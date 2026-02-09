@@ -2,6 +2,7 @@ node_modules/
 .wrangler/
 .dev.vars
 .env
+.env.local
 *.log
 .DS_Store
 dist/
@@ -10,3 +11,8 @@ dist/
 *.pyc
 __pycache__/
 .pytest_cache/
+
+# Environment files
+.env
+.env.local
+.dev.vars
