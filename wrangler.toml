@@ -1,6 +1,7 @@
 name = "blt-leaf"
 main = "src/index.py"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["python_workers"]
 
 [[d1_databases]]
 binding = "DB"
@@ -9,6 +10,8 @@ database_id = "pr-tracker-db"
 
 [vars]
 ENVIRONMENT = "production"
+# GITHUB_TOKEN can be configured in Cloudflare Dashboard > Workers > Settings > Variables
+# or for local dev, add to .env file
 
 # Configure assets (static files)
 [assets]
