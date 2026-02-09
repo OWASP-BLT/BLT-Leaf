@@ -2,6 +2,7 @@ from js import Response, fetch, Headers, URL
 import json
 import re
 from datetime import datetime
+from pyodide.ffi import to_js
 
 def parse_pr_url(pr_url):
     """Parse GitHub PR URL to extract owner, repo, and PR number"""
@@ -15,13 +16,62 @@ def parse_pr_url(pr_url):
         }
     return None
 
-async def fetch_pr_data(owner, repo, pr_number):
+async def fetch_github(url, env):
+    """
+    Fetch data from GitHub API with optional authentication.
+    
+    Args:
+        url: GitHub API endpoint URL
+        env: Worker environment object containing GITHUB_TOKEN (if configured)
+    
+    Returns:
+        Response object from fetch
+    """
+    # Prepare headers
+    headers = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'BLT-Leaf-Worker'
+    }
+    
+    # Add Authorization header if GITHUB_TOKEN is configured
+    if hasattr(env, 'GITHUB_TOKEN') and env.GITHUB_TOKEN:
+        headers['Authorization'] = f'Bearer {env.GITHUB_TOKEN}'
+    
+    # Prepare fetch options
+    options = {
+        'headers': headers
+    }
+    
+    # Convert to JS object
+    options_js = to_js(options, dict_converter=js.Object.fromEntries)
+    
+    # Make the request
+    response = await fetch(url, options_js)
+    
+    # Log rate limit info for debugging
+    rate_limit = response.headers.get('X-RateLimit-Limit')
+    remaining = response.headers.get('X-RateLimit-Remaining')
+    if rate_limit and remaining:
+        print(f"GitHub API: {remaining}/{rate_limit} requests remaining")
+    
+    # Check for rate limit errors
+    if response.status == 403:
+        rate_limit_remaining = response.headers.get('X-RateLimit-Remaining')
+        if rate_limit_remaining == '0':
+            rate_limit_reset = response.headers.get('X-RateLimit-Reset')
+            print(f"⚠️ GitHub API rate limit exceeded. Resets at: {rate_limit_reset}")
+            if not (hasattr(env, 'GITHUB_TOKEN') and env.GITHUB_TOKEN):
+                print(f"💡 Tip: Configure GITHUB_TOKEN environment variable to increase limit from 60 to 5000 requests/hour")
+    
+    return response
+
+async def fetch_pr_data(owner, repo, pr_number, env):
     """Fetch PR data from GitHub API"""
     try:
         # Fetch PR details
         pr_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
-        pr_response = await fetch(pr_url)
-        
+        pr_response = await fetch_github(pr_url, env)
+
         # Check for rate limiting and errors
         if pr_response.status == 403 or pr_response.status == 429:
             raise Exception("GitHub API rate limit exceeded. Please try again later.")
@@ -29,29 +79,29 @@ async def fetch_pr_data(owner, repo, pr_number):
             raise Exception("PR not found or repository is private")
         elif pr_response.status >= 400:
             raise Exception(f"GitHub API error: {pr_response.status}")
-            
+
         pr_data = await pr_response.json()
-        
+
         # Fetch PR files
         files_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files"
-        files_response = await fetch(files_url)
+        files_response = await fetch_github(files_url, env)
         files_data = await files_response.json() if files_response.status == 200 else []
-        
+
         # Fetch PR reviews
         reviews_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
-        reviews_response = await fetch(reviews_url)
+        reviews_response = await fetch_github(reviews_url, env)
         reviews_data = await reviews_response.json() if reviews_response.status == 200 else []
-        
+
         # Fetch check runs
         checks_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{pr_data['head']['sha']}/check-runs"
-        checks_response = await fetch(checks_url)
+        checks_response = await fetch_github(checks_url, env)
         checks_data = await checks_response.json() if checks_response.status == 200 else {}
-        
+
         # Process check runs
         checks_passed = 0
         checks_failed = 0
         checks_skipped = 0
-        
+
         if 'check_runs' in checks_data:
             for check in checks_data['check_runs']:
                 if check['conclusion'] == 'success':
@@ -60,19 +110,19 @@ async def fetch_pr_data(owner, repo, pr_number):
                     checks_failed += 1
                 elif check['conclusion'] in ['skipped', 'neutral']:
                     checks_skipped += 1
-        
+
         # Determine review status - sort by submitted_at to get latest reviews
         review_status = 'none'
         if reviews_data:
             # Sort reviews by submitted_at to get chronological order
             sorted_reviews = sorted(reviews_data, key=lambda x: x.get('submitted_at', ''))
-            
+
             # Get latest review per user
             latest_reviews = {}
             for review in sorted_reviews:
                 user = review['user']['login']
                 latest_reviews[user] = review['state']
-            
+
             # Determine overall status: changes_requested takes precedence over approved
             if 'CHANGES_REQUESTED' in latest_reviews.values():
                 review_status = 'changes_requested'
@@ -80,7 +130,7 @@ async def fetch_pr_data(owner, repo, pr_number):
                 review_status = 'approved'
             else:
                 review_status = 'pending'
-        
+
         return {
             'title': pr_data.get('title', ''),
             'state': pr_data.get('state', ''),
@@ -106,31 +156,31 @@ async def handle_add_pr(request, env):
     try:
         data = await request.json()
         pr_url = data.get('pr_url')
-        
+
         if not pr_url:
-            return Response.new(json.dumps({'error': 'PR URL is required'}), 
+            return Response.new(json.dumps({'error': 'PR URL is required'}),
                               status=400,
                               headers={'Content-Type': 'application/json'})
-        
+
         # Parse PR URL
         parsed = parse_pr_url(pr_url)
         if not parsed:
-            return Response.new(json.dumps({'error': 'Invalid GitHub PR URL'}), 
+            return Response.new(json.dumps({'error': 'Invalid GitHub PR URL'}),
                               status=400,
                               headers={'Content-Type': 'application/json'})
-        
+
         # Fetch PR data from GitHub
-        pr_data = await fetch_pr_data(parsed['owner'], parsed['repo'], parsed['pr_number'])
+        pr_data = await fetch_pr_data(parsed['owner'], parsed['repo'], parsed['pr_number'], env)
         if not pr_data:
-            return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
+            return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}),
                               status=500,
                               headers={'Content-Type': 'application/json'})
-        
+
         # Insert or update in database
         stmt = env.DB.prepare('''
-            INSERT INTO prs (pr_url, repo_owner, repo_name, pr_number, title, state, 
-                           is_merged, mergeable_state, files_changed, author_login, 
-                           author_avatar, checks_passed, checks_failed, checks_skipped, 
+            INSERT INTO prs (pr_url, repo_owner, repo_name, pr_number, title, state,
+                           is_merged, mergeable_state, files_changed, author_login,
+                           author_avatar, checks_passed, checks_failed, checks_skipped,
                            review_status, last_updated_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(pr_url) DO UPDATE SET
@@ -163,13 +213,13 @@ async def handle_add_pr(request, env):
             pr_data['review_status'],
             pr_data['last_updated_at']
         )
-        
+
         await stmt.run()
-        
-        return Response.new(json.dumps({'success': True, 'data': pr_data}), 
+
+        return Response.new(json.dumps({'success': True, 'data': pr_data}),
                           headers={'Content-Type': 'application/json'})
     except Exception as e:
-        return Response.new(json.dumps({'error': str(e)}), 
+        return Response.new(json.dumps({'error': str(e)}),
                           status=500,
                           headers={'Content-Type': 'application/json'})
 
@@ -180,7 +230,7 @@ async def handle_list_prs(env, repo_filter=None):
             parts = repo_filter.split('/')
             if len(parts) == 2:
                 stmt = env.DB.prepare('''
-                    SELECT * FROM prs 
+                    SELECT * FROM prs
                     WHERE repo_owner = ? AND repo_name = ?
                     ORDER BY last_updated_at DESC
                 ''').bind(parts[0], parts[1])
@@ -188,14 +238,14 @@ async def handle_list_prs(env, repo_filter=None):
                 stmt = env.DB.prepare('SELECT * FROM prs ORDER BY last_updated_at DESC')
         else:
             stmt = env.DB.prepare('SELECT * FROM prs ORDER BY last_updated_at DESC')
-        
+
         result = await stmt.all()
         prs = result.results if hasattr(result, 'results') else []
-        
-        return Response.new(json.dumps({'prs': prs}), 
+
+        return Response.new(json.dumps({'prs': prs}),
                           headers={'Content-Type': 'application/json'})
     except Exception as e:
-        return Response.new(json.dumps({'error': str(e)}), 
+        return Response.new(json.dumps({'error': str(e)}),
                           status=500,
                           headers={'Content-Type': 'application/json'})
 
@@ -203,20 +253,20 @@ async def handle_list_repos(env):
     """List all unique repos"""
     try:
         stmt = env.DB.prepare('''
-            SELECT DISTINCT repo_owner, repo_name, 
+            SELECT DISTINCT repo_owner, repo_name,
                    COUNT(*) as pr_count
-            FROM prs 
+            FROM prs
             GROUP BY repo_owner, repo_name
             ORDER BY repo_owner, repo_name
         ''')
-        
+
         result = await stmt.all()
         repos = result.results if hasattr(result, 'results') else []
-        
-        return Response.new(json.dumps({'repos': repos}), 
+
+        return Response.new(json.dumps({'repos': repos}),
                           headers={'Content-Type': 'application/json'})
     except Exception as e:
-        return Response.new(json.dumps({'error': str(e)}), 
+        return Response.new(json.dumps({'error': str(e)}),
                           status=500,
                           headers={'Content-Type': 'application/json'})
 
@@ -225,28 +275,28 @@ async def handle_refresh_pr(request, env):
     try:
         data = await request.json()
         pr_id = data.get('pr_id')
-        
+
         if not pr_id:
-            return Response.new(json.dumps({'error': 'PR ID is required'}), 
+            return Response.new(json.dumps({'error': 'PR ID is required'}),
                               status=400,
                               headers={'Content-Type': 'application/json'})
-        
+
         # Get PR URL from database
         stmt = env.DB.prepare('SELECT pr_url, repo_owner, repo_name, pr_number FROM prs WHERE id = ?').bind(pr_id)
         result = await stmt.first()
-        
+
         if not result:
-            return Response.new(json.dumps({'error': 'PR not found'}), 
+            return Response.new(json.dumps({'error': 'PR not found'}),
                               status=404,
                               headers={'Content-Type': 'application/json'})
-        
+
         # Fetch fresh data from GitHub
-        pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'])
+        pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'], env)
         if not pr_data:
-            return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
+            return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}),
                               status=500,
                               headers={'Content-Type': 'application/json'})
-        
+
         # Update database
         stmt = env.DB.prepare('''
             UPDATE prs SET
@@ -268,13 +318,13 @@ async def handle_refresh_pr(request, env):
             pr_data['last_updated_at'],
             pr_id
         )
-        
+
         await stmt.run()
-        
-        return Response.new(json.dumps({'success': True, 'data': pr_data}), 
+
+        return Response.new(json.dumps({'success': True, 'data': pr_data}),
                           headers={'Content-Type': 'application/json'})
     except Exception as e:
-        return Response.new(json.dumps({'error': str(e)}), 
+        return Response.new(json.dumps({'error': str(e)}),
                           status=500,
                           headers={'Content-Type': 'application/json'})
 
@@ -282,7 +332,7 @@ async def on_fetch(request, env):
     """Main request handler"""
     url = URL.new(request.url)
     path = url.pathname
-    
+
     # CORS headers
     # NOTE: '*' allows all origins for public access. In production, consider
     # restricting to specific domains by setting this to your domain(s).
@@ -291,22 +341,22 @@ async def on_fetch(request, env):
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
     }
-    
+
     # Handle CORS preflight
     if request.method == 'OPTIONS':
         return Response.new('', headers=cors_headers)
-    
-    # Serve HTML for root path  
+
+    # Serve HTML for root path
     if path == '/' or path == '/index.html':
         # Use env.ASSETS to serve static files if available
         if hasattr(env, 'ASSETS'):
             return await env.ASSETS.fetch(request)
         else:
             # Fallback: return simple message
-            return Response.new('Please configure assets in wrangler.toml', 
+            return Response.new('Please configure assets in wrangler.toml',
                               status=200,
                               headers={**cors_headers, 'Content-Type': 'text/html'})
-    
+
     # API endpoints
     if path == '/api/prs' and request.method == 'GET':
         repo_filter = url.searchParams.get('repo')
@@ -314,28 +364,28 @@ async def on_fetch(request, env):
         for key, value in cors_headers.items():
             response.headers.set(key, value)
         return response
-    
+
     if path == '/api/prs' and request.method == 'POST':
         response = await handle_add_pr(request, env)
         for key, value in cors_headers.items():
             response.headers.set(key, value)
         return response
-    
+
     if path == '/api/repos' and request.method == 'GET':
         response = await handle_list_repos(env)
         for key, value in cors_headers.items():
             response.headers.set(key, value)
         return response
-    
+
     if path == '/api/refresh' and request.method == 'POST':
         response = await handle_refresh_pr(request, env)
         for key, value in cors_headers.items():
             response.headers.set(key, value)
         return response
-    
+
     # Try to serve from assets
     if hasattr(env, 'ASSETS'):
         return await env.ASSETS.fetch(request)
-    
+
     # 404
     return Response.new('Not Found', status=404, headers=cors_headers)
