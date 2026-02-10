@@ -79,6 +79,7 @@ async def init_database_schema(env):
                 checks_skipped INTEGER DEFAULT 0,
                 review_status TEXT,
                 last_updated_at TEXT,
+                last_refreshed_at TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
@@ -359,6 +360,7 @@ async def handle_refresh_pr(request, env):
                 title = ?, state = ?, is_merged = ?, mergeable_state = ?,
                 files_changed = ?, checks_passed = ?, checks_failed = ?,
                 checks_skipped = ?, review_status = ?, last_updated_at = ?,
+                last_refreshed_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         ''').bind(

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS prs (
     checks_skipped INTEGER DEFAULT 0,
     review_status TEXT,
     last_updated_at TEXT,
+    last_refreshed_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
