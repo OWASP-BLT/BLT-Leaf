@@ -1,6 +1,7 @@
 -- Database schema for PR tracker
 -- Note: For existing databases, the application automatically migrates 
 -- by checking for missing columns and adding them with ALTER TABLE.
+-- This ensures backward compatibility when upgrading to newer versions.
 CREATE TABLE IF NOT EXISTS prs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pr_url TEXT NOT NULL UNIQUE,
