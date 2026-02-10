@@ -727,13 +727,28 @@
 
         // Refresh PR
         async function refreshPr(prId) {
-            const btn = document.querySelector(`.refresh-btn[data-pr-id="${prId}"]`);
+            // Find button using proper escaping
+            const buttons = document.querySelectorAll('.refresh-btn');
+            let btn = null;
+            for (const button of buttons) {
+                if (button.dataset.prId === String(prId)) {
+                    btn = button;
+                    break;
+                }
+            }
             if (!btn) return;
             
-            // Add spinner
+            // Add spinner using DOM manipulation to avoid XSS
             const originalText = btn.textContent;
             btn.classList.add('refreshing');
-            btn.innerHTML = '<span class="spinner"></span>Refreshing...';
+            btn.textContent = '';
+            
+            const spinner = document.createElement('span');
+            spinner.className = 'spinner';
+            btn.appendChild(spinner);
+            
+            const text = document.createTextNode('Refreshing...');
+            btn.appendChild(text);
             
             try {
                 const response = await fetch('/api/refresh', {

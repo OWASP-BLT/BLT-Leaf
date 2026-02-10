@@ -354,14 +354,17 @@ async def handle_refresh_pr(request, env):
             return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
                               {'status': 500, 'headers': {'Content-Type': 'application/json'}})
         
+        # Generate timestamps in Python for consistency and testability
+        current_timestamp = datetime.utcnow().isoformat() + 'Z'
+        
         # Update database
         stmt = db.prepare('''
             UPDATE prs SET
                 title = ?, state = ?, is_merged = ?, mergeable_state = ?,
                 files_changed = ?, checks_passed = ?, checks_failed = ?,
                 checks_skipped = ?, review_status = ?, last_updated_at = ?,
-                last_refreshed_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
+                last_refreshed_at = ?,
+                updated_at = ?
             WHERE id = ?
         ''').bind(
             pr_data['title'],
@@ -374,6 +377,8 @@ async def handle_refresh_pr(request, env):
             pr_data['checks_skipped'],
             pr_data['review_status'],
             pr_data['last_updated_at'],
+            current_timestamp,
+            current_timestamp,
             pr_id
         )
         
