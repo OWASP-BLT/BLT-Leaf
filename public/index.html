@@ -194,7 +194,7 @@
 
         .pr-details {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(3, 1fr);
             gap: 1rem;
             margin-top: 1rem;
         }
@@ -262,18 +262,23 @@
 
         .checks-summary {
             display: flex;
-            gap: 1rem;
+            gap: 0.5rem;
             flex-wrap: wrap;
+        }
+        
+        .pr-details .detail-item:last-child {
+            grid-column: 1 / -1;
         }
 
         .check-stat {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 0.75rem;
+            gap: 0.4rem;
+            padding: 0.4rem 0.6rem;
             background: #0d1117;
             border-radius: 6px;
             border: 1px solid #30363d;
+            font-size: 0.9rem;
         }
 
         .check-icon {
