@@ -2,7 +2,7 @@ from js import Response, fetch, Headers, URL, Object
 from pyodide.ffi import to_js
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Track if schema initialization has been attempted in this worker instance
 # This is safe in Cloudflare Workers Python as each isolate runs single-threaded
@@ -355,7 +355,7 @@ async def handle_refresh_pr(request, env):
                               {'status': 500, 'headers': {'Content-Type': 'application/json'}})
         
         # Generate timestamps in Python for consistency and testability
-        current_timestamp = datetime.utcnow().isoformat() + 'Z'
+        current_timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         
         # Update database
         stmt = db.prepare('''

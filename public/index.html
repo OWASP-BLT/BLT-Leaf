@@ -731,6 +731,7 @@
             const buttons = document.querySelectorAll('.refresh-btn');
             let btn = null;
             for (const button of buttons) {
+                // dataset values are strings, ensure prId is also a string for comparison
                 if (button.dataset.prId === String(prId)) {
                     btn = button;
                     break;
