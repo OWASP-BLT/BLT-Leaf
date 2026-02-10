@@ -269,6 +269,16 @@
         .pr-details .detail-item:last-child {
             grid-column: 1 / -1;
         }
+        
+        @media (max-width: 768px) {
+            .pr-details {
+                grid-template-columns: 1fr;
+            }
+            
+            .pr-details .detail-item:last-child {
+                grid-column: 1;
+            }
+        }
 
         .check-stat {
             display: flex;
