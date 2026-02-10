@@ -657,32 +657,32 @@
                         </div>
                     </div>
                     
-                    <div class="pr-details">
-                        <div class="pr-details-row">
-                            <div class="pr-details-cell">
+                    <div class="pr-details" role="table">
+                        <div class="pr-details-row" role="row">
+                            <div class="pr-details-cell" role="columnheader">
                                 <div class="detail-label">Merge Status</div>
                             </div>
-                            <div class="pr-details-cell">
+                            <div class="pr-details-cell" role="columnheader">
                                 <div class="detail-label">Files Changed</div>
                             </div>
-                            <div class="pr-details-cell">
+                            <div class="pr-details-cell" role="columnheader">
                                 <div class="detail-label">Last Updated</div>
                             </div>
-                            <div class="pr-details-cell">
+                            <div class="pr-details-cell" role="columnheader">
                                 <div class="detail-label">Checks</div>
                             </div>
                         </div>
-                        <div class="pr-details-row">
-                            <div class="pr-details-cell">
+                        <div class="pr-details-row" role="row">
+                            <div class="pr-details-cell" role="cell">
                                 <div class="detail-value">${escapeHtml(mergeableText)}</div>
                             </div>
-                            <div class="pr-details-cell">
+                            <div class="pr-details-cell" role="cell">
                                 <div class="detail-value">${pr.files_changed}</div>
                             </div>
-                            <div class="pr-details-cell">
+                            <div class="pr-details-cell" role="cell">
                                 <div class="detail-value time-ago">${escapeHtml(timeAgo(pr.last_updated_at))}</div>
                             </div>
-                            <div class="pr-details-cell">
+                            <div class="pr-details-cell" role="cell">
                                 <div class="checks-summary">
                                     <div class="check-stat">
                                         <div class="check-icon check-success"></div>
