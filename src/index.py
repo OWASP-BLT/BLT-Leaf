@@ -46,6 +46,7 @@ async def init_database_schema(env):
     
     This function is idempotent and safe to call multiple times.
     Uses CREATE TABLE IF NOT EXISTS to avoid errors on existing tables.
+    Includes migration logic to add missing columns to existing tables.
     A module-level flag prevents redundant calls within the same worker instance.
     """
     global _schema_init_attempted
@@ -85,6 +86,23 @@ async def init_database_schema(env):
             )
         ''')
         await create_table.run()
+        
+        # Migration: Add last_refreshed_at column if it doesn't exist
+        # Check if column exists by querying PRAGMA table_info
+        try:
+            pragma_result = db.prepare('PRAGMA table_info(prs)')
+            columns_result = await pragma_result.all()
+            columns = columns_result.results.to_py() if hasattr(columns_result, 'results') else []
+            
+            # Check if last_refreshed_at column exists
+            column_names = [col['name'] for col in columns if isinstance(col, dict)]
+            if 'last_refreshed_at' not in column_names:
+                print("Migrating database: Adding last_refreshed_at column")
+                alter_table = db.prepare('ALTER TABLE prs ADD COLUMN last_refreshed_at TEXT')
+                await alter_table.run()
+        except Exception as migration_error:
+            # Column may already exist or migration failed - log but continue
+            print(f"Note: Migration check for last_refreshed_at: {str(migration_error)}")
         
         # Create indexes (idempotent with IF NOT EXISTS)
         index1 = db.prepare('CREATE INDEX IF NOT EXISTS idx_repo ON prs(repo_owner, repo_name)')
