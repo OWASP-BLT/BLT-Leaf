@@ -6,13 +6,18 @@ compatibility_flags = ["python_workers"]
 [[d1_databases]]
 binding = "DB"
 database_name = "pr_tracker"
-database_id = "pr-tracker-db"
+# IMPORTANT: Replace "your-database-id-here" with your real database ID
+# To get your database ID, run: wrangler d1 create pr-tracker
+# Or run ./setup-local.sh to do this automatically
+database_id = "your-database-id-here"
 
 [vars]
 ENVIRONMENT = "production"
-# GITHUB_TOKEN can be configured in Cloudflare Dashboard > Workers > Settings > Variables
+# GITHUB_TOKEN is optional - add to Cloudflare Dashboard > Workers > Settings > Variables
 # or for local dev, add to .env file
+# It increases GitHub API rate limit from 60 to 5,000 requests/hour
 
 # Configure assets (static files)
 [assets]
 directory = "./public"
+```
