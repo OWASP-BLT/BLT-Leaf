@@ -36,7 +36,6 @@ A complete serverless PR tracking application consisting of:
 
 ### 4. Configuration
 - **wrangler.toml**: Cloudflare Workers configuration
-- **package.json**: npm scripts for deployment
 - **.gitignore**: Proper exclusions
 
 ### 5. Documentation
@@ -199,8 +198,7 @@ Required setup:
 
 ### Configuration
 - `.gitignore` - Git exclusions
-- `package.json` - npm scripts
-- `requirements.txt` - Python dependencies (none needed)
+- `wrangler.toml` - Workers configuration
 
 ### Documentation
 - `README.md` - Main documentation

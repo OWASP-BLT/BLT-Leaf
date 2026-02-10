@@ -24,11 +24,8 @@ If you prefer manual deployment or need more control, follow these steps:
 ## Quick Start
 
 1. **Install Wrangler**
-```bash
-npm install -g wrangler
-# or
-npm install
-```
+
+See [Wrangler installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/) for installation options including npm, homebrew, cargo, or other package managers.
 
 2. **Login to Cloudflare**
 ```bash

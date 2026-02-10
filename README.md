@@ -26,7 +26,6 @@ BLT-Leaf/
 │   └── index.py        # Cloudflare Worker main handler
 ├── schema.sql          # Database schema for D1
 ├── wrangler.toml       # Cloudflare Workers configuration
-├── package.json        # npm scripts for deployment
 ├── DEPLOYMENT.md       # Detailed deployment instructions
 └── README.md          # This file
 ```
@@ -62,9 +61,8 @@ cd BLT-Leaf
 ```
 
 2. Install Wrangler (if not already installed):
-```bash
-npm install -g wrangler
-```
+
+See [Wrangler installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/) for installation options including npm, homebrew, or other package managers.
 
 3. Login to Cloudflare:
 ```bash
