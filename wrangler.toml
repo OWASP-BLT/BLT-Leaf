@@ -20,4 +20,3 @@ ENVIRONMENT = "production"
 # Configure assets (static files)
 [assets]
 directory = "./public"
-```
