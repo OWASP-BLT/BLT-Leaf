@@ -25,7 +25,7 @@ If you prefer manual deployment or need more control, follow these steps:
 
 1. **Install Wrangler**
 
-See [Wrangler installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/) for installation options including npm, homebrew, cargo, or other package managers.
+See [Wrangler installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/) for installation options including npm, homebrew, cargo, or other package managers. **Use Wrangler v3 or later**, as Python Workers require Wrangler 3.x+.
 
 2. **Login to Cloudflare**
 ```bash

@@ -194,7 +194,6 @@ Required setup:
 - `public/index.html` - Frontend application
 - `src/index.html` - Copy for reference
 - `schema.sql` - Database schema
-- `wrangler.toml` - Workers configuration
 
 ### Configuration
 - `.gitignore` - Git exclusions

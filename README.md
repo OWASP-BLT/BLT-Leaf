@@ -62,7 +62,7 @@ cd BLT-Leaf
 
 2. Install Wrangler (if not already installed):
 
-See [Wrangler installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/) for installation options including npm, homebrew, or other package managers.
+See [Wrangler installation guide](https://developers.cloudflare.com/workers/wrangler/install-and-update/) for installation options including npm, homebrew, or other package managers. **Use Wrangler v3 or later**, as Python Workers require Wrangler 3.x+.
 
 3. Login to Cloudflare:
 ```bash
