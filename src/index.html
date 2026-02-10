@@ -286,7 +286,7 @@
             flex-wrap: wrap;
         }
         
-        .pr-details .detail-item:last-child {
+        .pr-details .detail-item--checks {
             grid-column: 1 / -1;
         }
         
@@ -295,7 +295,7 @@
                 grid-template-columns: 1fr;
             }
             
-            .pr-details .detail-item:last-child {
+            .pr-details .detail-item--checks {
                 grid-column: 1;
             }
         }
@@ -673,7 +673,7 @@
                             <div class="detail-value time-ago">${escapeHtml(timeAgo(pr.last_updated_at))}</div>
                         </div>
                         
-                        <div class="detail-item">
+                        <div class="detail-item detail-item--checks">
                             <div class="detail-label">Checks</div>
                             <div class="checks-summary">
                                 <div class="check-stat">
