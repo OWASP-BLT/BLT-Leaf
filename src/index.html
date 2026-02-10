@@ -213,27 +213,49 @@
         }
 
         .pr-details {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1rem;
+            display: table;
+            width: 100%;
+            border-collapse: collapse;
             margin-top: 1rem;
         }
 
-        .detail-item {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
+        .pr-details-row {
+            display: table-row;
+        }
+
+        .pr-details-cell {
+            display: table-cell;
+            padding: 0.4rem 0.75rem;
+            border: 1px solid #30363d;
+            vertical-align: middle;
+        }
+
+        .pr-details-cell:first-child {
+            width: 15%;
+        }
+
+        .pr-details-cell:nth-child(2) {
+            width: 12%;
+        }
+
+        .pr-details-cell:nth-child(3) {
+            width: 15%;
+        }
+
+        .pr-details-cell:nth-child(4) {
+            width: 58%;
         }
 
         .detail-label {
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             color: #8b949e;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            font-weight: 600;
         }
 
         .detail-value {
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             font-weight: 600;
         }
 
@@ -282,33 +304,37 @@
 
         .checks-summary {
             display: flex;
-            gap: 0.5rem;
+            gap: 0.4rem;
             flex-wrap: wrap;
-        }
-        
-        .pr-details .detail-item--checks {
-            grid-column: 1 / -1;
+            align-items: center;
         }
         
         @media (max-width: 768px) {
             .pr-details {
-                grid-template-columns: 1fr;
+                display: block;
             }
             
-            .pr-details .detail-item--checks {
-                grid-column: 1;
+            .pr-details-row {
+                display: block;
+                margin-bottom: 1rem;
+            }
+            
+            .pr-details-cell {
+                display: block;
+                padding: 0.5rem;
+                margin-bottom: 0.25rem;
             }
         }
 
         .check-stat {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 0.4rem;
-            padding: 0.4rem 0.6rem;
+            gap: 0.3rem;
+            padding: 0.3rem 0.5rem;
             background: #0d1117;
             border-radius: 6px;
             border: 1px solid #30363d;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
 
         .check-icon {
@@ -658,35 +684,44 @@
                     </div>
                     
                     <div class="pr-details">
-                        <div class="detail-item">
-                            <div class="detail-label">Merge Status</div>
-                            <div class="detail-value">${escapeHtml(mergeableText)}</div>
+                        <div class="pr-details-row">
+                            <div class="pr-details-cell">
+                                <div class="detail-label">Merge Status</div>
+                            </div>
+                            <div class="pr-details-cell">
+                                <div class="detail-label">Files Changed</div>
+                            </div>
+                            <div class="pr-details-cell">
+                                <div class="detail-label">Last Updated</div>
+                            </div>
+                            <div class="pr-details-cell">
+                                <div class="detail-label">Checks</div>
+                            </div>
                         </div>
-                        
-                        <div class="detail-item">
-                            <div class="detail-label">Files Changed</div>
-                            <div class="detail-value">${pr.files_changed}</div>
-                        </div>
-                        
-                        <div class="detail-item">
-                            <div class="detail-label">Last Updated</div>
-                            <div class="detail-value time-ago">${escapeHtml(timeAgo(pr.last_updated_at))}</div>
-                        </div>
-                        
-                        <div class="detail-item detail-item--checks">
-                            <div class="detail-label">Checks</div>
-                            <div class="checks-summary">
-                                <div class="check-stat">
-                                    <div class="check-icon check-success"></div>
-                                    <span>${pr.checks_passed} passed</span>
-                                </div>
-                                <div class="check-stat">
-                                    <div class="check-icon check-failure"></div>
-                                    <span>${pr.checks_failed > 0 ? `<a href="https://github.com/${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}/pull/${escapeHtml(String(pr.pr_number))}/checks" target="_blank" rel="noopener noreferrer">${escapeHtml(String(pr.checks_failed))} failed</a>` : `${pr.checks_failed} failed`}</span>
-                                </div>
-                                <div class="check-stat">
-                                    <div class="check-icon check-skipped"></div>
-                                    <span>${pr.checks_skipped} skipped</span>
+                        <div class="pr-details-row">
+                            <div class="pr-details-cell">
+                                <div class="detail-value">${escapeHtml(mergeableText)}</div>
+                            </div>
+                            <div class="pr-details-cell">
+                                <div class="detail-value">${pr.files_changed}</div>
+                            </div>
+                            <div class="pr-details-cell">
+                                <div class="detail-value time-ago">${escapeHtml(timeAgo(pr.last_updated_at))}</div>
+                            </div>
+                            <div class="pr-details-cell">
+                                <div class="checks-summary">
+                                    <div class="check-stat">
+                                        <div class="check-icon check-success"></div>
+                                        <span>${pr.checks_passed} passed</span>
+                                    </div>
+                                    <div class="check-stat">
+                                        <div class="check-icon check-failure"></div>
+                                        <span>${pr.checks_failed > 0 ? `<a href="https://github.com/${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}/pull/${escapeHtml(String(pr.pr_number))}/checks" target="_blank" rel="noopener noreferrer">${escapeHtml(String(pr.checks_failed))} failed</a>` : `${pr.checks_failed} failed`}</span>
+                                    </div>
+                                    <div class="check-stat">
+                                        <div class="check-icon check-skipped"></div>
+                                        <span>${pr.checks_skipped} skipped</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
