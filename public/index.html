@@ -136,7 +136,10 @@
             const username = prompt('Enter your GitHub username to track PR refreshes:');
             if (username && username.trim()) {
                 const trimmedUsername = username.trim();
-                // Validate GitHub username format (alphanumeric and hyphens, 1-39 characters)
+                // Validate GitHub username format
+                // Must match GitHub's requirements: 1-39 characters, alphanumeric and hyphens,
+                // must start and end with alphanumeric character
+                // This regex must stay synchronized with backend validation in src/index.py
                 const githubUsernameRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
                 if (!githubUsernameRegex.test(trimmedUsername)) {
                     showError('Invalid GitHub username. Username must be 1-39 characters and contain only alphanumeric characters and hyphens.');
@@ -463,7 +466,7 @@
                         </div>
                         <div class="flex items-center gap-2">
                             <button class="refresh-btn rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-400 hover:text-slate-900" data-pr-id="${pr.id}">Refresh</button>
-                            ${pr.last_refreshed_at ? `<span class="text-xs text-slate-500">(last: ${escapeHtml(timeAgo(pr.last_refreshed_at))})</span>` : ''}
+                            ${pr.last_refreshed_at ? `<span class="text-xs text-slate-500">(last refreshed ${escapeHtml(timeAgo(pr.last_refreshed_at))})</span>` : ''}
                         </div>
                     </div>
                 `;
@@ -492,10 +495,9 @@
                     if (data.refresh_count === 0) {
                         infoEl.textContent = 'Never refreshed';
                     } else {
-                        const uniqueUsers = [...new Set(data.history.map(h => h.refreshed_by))];
-                        const userText = uniqueUsers.length === 1 
-                            ? `by ${uniqueUsers[0]}` 
-                            : `by ${uniqueUsers.length} users`;
+                        const userText = data.unique_users === 1 
+                            ? `by 1 user` 
+                            : `by ${data.unique_users} users`;
                         infoEl.textContent = `Refreshed ${data.refresh_count} time${data.refresh_count !== 1 ? 's' : ''} ${userText}`;
                     }
                 }

@@ -22,6 +22,11 @@ def verify_auth_token(request):
     Expected format: "Bearer {username}"
     The username is passed directly without encoding for simplicity.
     In production, this should be a proper JWT or session token.
+    
+    Username validation follows GitHub's requirements:
+    - 1-39 characters long
+    - Alphanumeric characters and hyphens only
+    - Must start and end with alphanumeric character
     """
     auth_header = request.headers.get('Authorization')
     if not auth_header:
@@ -34,16 +39,16 @@ def verify_auth_token(request):
         
         username = auth_header[7:]  # Remove "Bearer " prefix
         
-        # Validate GitHub username format (alphanumeric and hyphens, 1-39 characters)
-        # Username must start and end with alphanumeric character
-        if not username or len(username) > 39:
+        # Validate GitHub username format
+        # Length must be 1-39 characters
+        if not username or len(username) < 1 or len(username) > 39:
             return None
         
-        # Simple validation: alphanumeric and hyphens only
+        # Must contain only alphanumeric characters and hyphens
         if not all(c.isalnum() or c == '-' for c in username):
             return None
         
-        # Must start and end with alphanumeric
+        # Must start and end with alphanumeric character
         if not username[0].isalnum() or not username[-1].isalnum():
             return None
         
@@ -610,8 +615,14 @@ async def handle_get_refresh_history(env, pr_id):
         count_result = await count_stmt.first()
         refresh_count = count_result.to_py()['count'] if count_result else 0
         
+        # Get unique user count
+        unique_stmt = db.prepare('SELECT COUNT(DISTINCT refreshed_by) as count FROM refresh_history WHERE pr_id = ?').bind(pr_id)
+        unique_result = await unique_stmt.first()
+        unique_users = unique_result.to_py()['count'] if unique_result else 0
+        
         return Response.new(json.dumps({
             'refresh_count': refresh_count,
+            'unique_users': unique_users,
             'history': history
         }), 
                           {'headers': {'Content-Type': 'application/json'}})
