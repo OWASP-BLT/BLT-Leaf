@@ -135,7 +135,14 @@
             // Simple login - ask for GitHub username
             const username = prompt('Enter your GitHub username to track PR refreshes:');
             if (username && username.trim()) {
-                githubUsername = username.trim();
+                const trimmedUsername = username.trim();
+                // Validate GitHub username format (alphanumeric and hyphens, 1-39 characters)
+                const githubUsernameRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
+                if (!githubUsernameRegex.test(trimmedUsername)) {
+                    showError('Invalid GitHub username. Username must be 1-39 characters and contain only alphanumeric characters and hyphens.');
+                    return;
+                }
+                githubUsername = trimmedUsername;
                 localStorage.setItem('github_username', githubUsername);
                 updateAuthUI(true);
                 showSuccess(`Logged in as ${githubUsername}`);

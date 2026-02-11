@@ -16,34 +16,11 @@ _rate_limit_cache = {
 # Cache TTL in seconds (5 minutes)
 _RATE_LIMIT_CACHE_TTL = 300
 
-def get_github_client_id(env):
-    """Get GitHub OAuth client ID from environment"""
-    # Try different attribute access methods
-    if hasattr(env, 'GITHUB_CLIENT_ID'):
-        return getattr(env, 'GITHUB_CLIENT_ID')
-    if hasattr(env, '__getitem__'):
-        try:
-            return env['GITHUB_CLIENT_ID']
-        except (KeyError, TypeError):
-            pass
-    return None
-
-def get_github_client_secret(env):
-    """Get GitHub OAuth client secret from environment"""
-    # Try different attribute access methods
-    if hasattr(env, 'GITHUB_CLIENT_SECRET'):
-        return getattr(env, 'GITHUB_CLIENT_SECRET')
-    if hasattr(env, '__getitem__'):
-        try:
-            return env['GITHUB_CLIENT_SECRET']
-        except (KeyError, TypeError):
-            pass
-    return None
-
 def verify_auth_token(request):
     """Extract and verify GitHub username from Authorization header
     
-    For simplicity, we're using a basic token format: base64(username)
+    Expected format: "Bearer {username}"
+    The username is passed directly without encoding for simplicity.
     In production, this should be a proper JWT or session token.
     """
     auth_header = request.headers.get('Authorization')
@@ -51,14 +28,26 @@ def verify_auth_token(request):
         return None
     
     try:
-        # Expected format: "Bearer base64_encoded_username"
+        # Expected format: "Bearer username"
         if not auth_header.startswith('Bearer '):
             return None
         
-        token = auth_header[7:]  # Remove "Bearer " prefix
-        # For now, we'll trust the client-provided username from the token
-        # In production, this should verify against a session store or JWT
-        return token  # Return the username directly
+        username = auth_header[7:]  # Remove "Bearer " prefix
+        
+        # Validate GitHub username format (alphanumeric and hyphens, 1-39 characters)
+        # Username must start and end with alphanumeric character
+        if not username or len(username) > 39:
+            return None
+        
+        # Simple validation: alphanumeric and hyphens only
+        if not all(c.isalnum() or c == '-' for c in username):
+            return None
+        
+        # Must start and end with alphanumeric
+        if not username[0].isalnum() or not username[-1].isalnum():
+            return None
+        
+        return username
     except Exception:
         return None
 
@@ -600,40 +589,6 @@ async def handle_status(env):
         }), 
                           {'headers': {'Content-Type': 'application/json'}})
 
-async def handle_github_oauth_callback(request, env):
-    """Handle GitHub OAuth callback"""
-    try:
-        url = URL.new(request.url)
-        code = url.searchParams.get('code')
-        
-        if not code:
-            return Response.new(json.dumps({'error': 'No authorization code provided'}), 
-                              {'status': 400, 'headers': {'Content-Type': 'application/json'}})
-        
-        client_id = get_github_client_id(env)
-        client_secret = get_github_client_secret(env)
-        
-        if not client_id or not client_secret:
-            return Response.new(json.dumps({'error': 'GitHub OAuth not configured'}), 
-                              {'status': 500, 'headers': {'Content-Type': 'application/json'}})
-        
-        # Exchange code for access token
-        token_url = 'https://github.com/login/oauth/access_token'
-        token_response = await fetch_with_headers(token_url, {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        })
-        
-        # For now, since we can't make POST requests easily in this environment,
-        # we'll implement a simpler auth mechanism
-        # In production, this would exchange the code for a token
-        
-        return Response.new(json.dumps({'error': 'OAuth callback not fully implemented yet'}), 
-                          {'status': 501, 'headers': {'Content-Type': 'application/json'}})
-    except Exception as e:
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
-                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
-
 async def handle_get_refresh_history(env, pr_id):
     """Get refresh history for a specific PR"""
     try:
@@ -737,12 +692,6 @@ async def on_fetch(request, env):
     
     if path == '/api/status' and request.method == 'GET':
         response = await handle_status(env)
-        for key, value in cors_headers.items():
-            response.headers.set(key, value)
-        return response
-    
-    if path == '/api/auth/github/callback' and request.method == 'GET':
-        response = await handle_github_oauth_callback(request, env)
         for key, value in cors_headers.items():
             response.headers.set(key, value)
         return response
