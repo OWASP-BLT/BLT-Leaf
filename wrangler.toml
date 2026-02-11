@@ -3,15 +3,15 @@ main = "src/index.py"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["python_workers"]
 
-[[d1_databases]]
-binding = "DB"
-database_name = "pr_tracker"
-database_id = "014201e7-6c0e-4b6a-8c0e-c53d18305dca"
 
 [vars]
 ENVIRONMENT = "production"
 GITHUB_TOKEN = "your_github_personal_access_token_here"
 
-# Configure assets (static files)
+[[d1_databases]]
+binding = "DB"
+database_name = "pr_tracker"
+database_id = "014201e7-6c0e-4b6a-8c0e-c53d18305dca"
+
 [assets]
 directory = "./public"
