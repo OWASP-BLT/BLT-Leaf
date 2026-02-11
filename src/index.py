@@ -16,6 +16,41 @@ _rate_limit_cache = {
 # Cache TTL in seconds (5 minutes)
 _RATE_LIMIT_CACHE_TTL = 300
 
+def verify_auth_token(request):
+    """Extract and verify GitHub username from Authorization header
+    
+    Expected format: "Bearer {username}"
+    The username is passed directly without encoding for simplicity.
+    In production, this should be a proper JWT or session token.
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return None
+    
+    try:
+        # Expected format: "Bearer username"
+        if not auth_header.startswith('Bearer '):
+            return None
+        
+        username = auth_header[7:]  # Remove "Bearer " prefix
+        
+        # Validate GitHub username format (alphanumeric and hyphens, 1-39 characters)
+        # Username must start and end with alphanumeric character
+        if not username or len(username) > 39:
+            return None
+        
+        # Simple validation: alphanumeric and hyphens only
+        if not all(c.isalnum() or c == '-' for c in username):
+            return None
+        
+        # Must start and end with alphanumeric
+        if not username[0].isalnum() or not username[-1].isalnum():
+            return None
+        
+        return username
+    except Exception:
+        return None
+
 def parse_pr_url(pr_url):
     """Parse GitHub PR URL to extract owner, repo, and PR number"""
     pattern = r'https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)'
@@ -118,6 +153,25 @@ async def init_database_schema(env):
         
         index2 = db.prepare('CREATE INDEX IF NOT EXISTS idx_pr_number ON prs(pr_number)')
         await index2.run()
+        
+        # Create refresh_history table (idempotent with IF NOT EXISTS)
+        create_refresh_history = db.prepare('''
+            CREATE TABLE IF NOT EXISTS refresh_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pr_id INTEGER NOT NULL,
+                refreshed_by TEXT NOT NULL,
+                refreshed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (pr_id) REFERENCES prs(id) ON DELETE CASCADE
+            )
+        ''')
+        await create_refresh_history.run()
+        
+        # Create indexes for refresh_history table
+        index3 = db.prepare('CREATE INDEX IF NOT EXISTS idx_refresh_pr_id ON refresh_history(pr_id)')
+        await index3.run()
+        
+        index4 = db.prepare('CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_history(refreshed_by)')
+        await index4.run()
         
     except Exception as e:
         # Log the error but don't crash - schema may already exist
@@ -353,8 +407,14 @@ async def handle_list_repos(env):
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 async def handle_refresh_pr(request, env):
-    """Refresh a specific PR's data"""
+    """Refresh a specific PR's data - requires authentication"""
     try:
+        # Verify authentication
+        github_username = verify_auth_token(request)
+        if not github_username:
+            return Response.new(json.dumps({'error': 'Authentication required. Please log in with GitHub to refresh PRs.'}), 
+                              {'status': 401, 'headers': {'Content-Type': 'application/json'}})
+        
         data = (await request.json()).to_py()
         pr_id = data.get('pr_id')
         
@@ -411,7 +471,24 @@ async def handle_refresh_pr(request, env):
         
         await stmt.run()
         
-        return Response.new(json.dumps({'success': True, 'data': pr_data}), 
+        # Record refresh history
+        history_stmt = db.prepare('''
+            INSERT INTO refresh_history (pr_id, refreshed_by, refreshed_at)
+            VALUES (?, ?, ?)
+        ''').bind(pr_id, github_username, current_timestamp)
+        await history_stmt.run()
+        
+        # Get refresh count
+        count_stmt = db.prepare('SELECT COUNT(*) as count FROM refresh_history WHERE pr_id = ?').bind(pr_id)
+        count_result = await count_stmt.first()
+        refresh_count = count_result.to_py()['count'] if count_result else 0
+        
+        return Response.new(json.dumps({
+            'success': True, 
+            'data': pr_data,
+            'refresh_count': refresh_count,
+            'refreshed_by': github_username
+        }), 
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
@@ -512,6 +589,37 @@ async def handle_status(env):
         }), 
                           {'headers': {'Content-Type': 'application/json'}})
 
+async def handle_get_refresh_history(env, pr_id):
+    """Get refresh history for a specific PR"""
+    try:
+        db = get_db(env)
+        
+        # Get refresh history
+        stmt = db.prepare('''
+            SELECT refreshed_by, refreshed_at
+            FROM refresh_history
+            WHERE pr_id = ?
+            ORDER BY refreshed_at DESC
+        ''').bind(pr_id)
+        
+        result = await stmt.all()
+        history = result.results.to_py() if hasattr(result, 'results') else []
+        
+        # Get refresh count
+        count_stmt = db.prepare('SELECT COUNT(*) as count FROM refresh_history WHERE pr_id = ?').bind(pr_id)
+        count_result = await count_stmt.first()
+        refresh_count = count_result.to_py()['count'] if count_result else 0
+        
+        return Response.new(json.dumps({
+            'refresh_count': refresh_count,
+            'history': history
+        }), 
+                          {'headers': {'Content-Type': 'application/json'}})
+    except Exception as e:
+        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
+                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+
+
 async def on_fetch(request, env):
     """Main request handler"""
     url = URL.new(request.url)
@@ -578,11 +686,28 @@ async def on_fetch(request, env):
     
     if path == '/api/rate-limit' and request.method == 'GET':
         response = await handle_rate_limit(env)
+        for key, value in cors_headers.items():
+            response.headers.set(key, value)
+        return response
+    
     if path == '/api/status' and request.method == 'GET':
         response = await handle_status(env)
         for key, value in cors_headers.items():
             response.headers.set(key, value)
         return response
+    
+    if path.startswith('/api/refresh-history/') and request.method == 'GET':
+        # Extract PR ID from path like /api/refresh-history/123
+        pr_id = path.split('/')[-1]
+        try:
+            pr_id = int(pr_id)
+            response = await handle_get_refresh_history(env, pr_id)
+            for key, value in cors_headers.items():
+                response.headers.set(key, value)
+            return response
+        except ValueError:
+            return Response.new(json.dumps({'error': 'Invalid PR ID'}), 
+                              {'status': 400, 'headers': {**cors_headers, 'Content-Type': 'application/json'}})
     
     # Try to serve from assets
     if hasattr(env, 'ASSETS'):

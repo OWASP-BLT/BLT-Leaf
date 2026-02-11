@@ -28,6 +28,18 @@ CREATE TABLE IF NOT EXISTS prs (
 CREATE INDEX IF NOT EXISTS idx_repo ON prs(repo_owner, repo_name);
 CREATE INDEX IF NOT EXISTS idx_pr_number ON prs(pr_number);
 
+-- Table to track PR refresh history
+CREATE TABLE IF NOT EXISTS refresh_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pr_id INTEGER NOT NULL,
+    refreshed_by TEXT NOT NULL,
+    refreshed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (pr_id) REFERENCES prs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_pr_id ON refresh_history(pr_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_history(refreshed_by);
+
 -- Migration for existing databases (if needed manually)
 -- Run this if the automatic migration in init_database_schema fails:
 -- ALTER TABLE prs ADD COLUMN last_refreshed_at TEXT;
