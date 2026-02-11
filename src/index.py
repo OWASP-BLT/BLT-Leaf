@@ -14,28 +14,82 @@ _rate_limit_cache = {
 }
 _RATE_LIMIT_CACHE_TTL = 300
 
+
+# CENTRALIZED RESPONSE HELPERS
+
+
+def json_response(data, status=200):
+    """Return a successful JSON response with CORS headers"""
+    cors_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Content-Type': 'application/json'
+    }
+    return Response.new(
+        json.dumps(data),
+        {'status': status, 'headers': cors_headers}
+    )
+
+def json_error(message, status=400):
+    """Return an error JSON response with CORS headers"""
+    return json_response({
+        'success': False,
+        'error': message,
+        'status': status
+    }, status=status)
+
+# UTILITIES
+
 def parse_pr_url(pr_url):
+    """
+    Parse GitHub PR URL and validate it's from OWASP-BLT organization.
+    
+    Args:
+        pr_url: GitHub PR URL string
+        
+    Returns:
+        dict with owner, repo, pr_number
+        
+    Raises:
+        ValueError: If URL is invalid or not from OWASP-BLT organization
+    """
     pattern = r'https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)'
     match = re.match(pattern, pr_url)
-    if match:
-        return {
-            'owner': match.group(1),
-            'repo': match.group(2),
-            'pr_number': int(match.group(3))
-        }
-    return None
+    
+    if not match:
+        raise ValueError("Invalid GitHub PR URL format. Expected: https://github.com/owner/repo/pull/number")
+    
+    owner = match.group(1)
+    repo = match.group(2)
+    pr_number = int(match.group(3))
+    
+    # OWASP-BLT validation (case-insensitive)
+    if owner.lower() != 'owasp-blt':
+        raise ValueError("Only repositories under the OWASP-BLT organization are allowed.")
+    
+    return {
+        'owner': owner,
+        'repo': repo,
+        'pr_number': pr_number
+    }
 
 def get_db(env):
+    """Get database binding from environment"""
     for name in ['DB', 'pr_tracker']:
         if hasattr(env, name):
             return getattr(env, name)
     raise Exception("Database binding 'DB' not found. Check wrangler.toml")
+    
+# DATABASE INITIALIZATION
 
 async def init_database_schema(env):
+    """Initialize database schema if not already done"""
     global _schema_init_attempted
     if _schema_init_attempted:
         return
     _schema_init_attempted = True
+    
     try:
         db = get_db(env)
         await db.prepare('''
@@ -64,8 +118,11 @@ async def init_database_schema(env):
         ''').run()
     except Exception as e:
         print(f"Schema Init Note: {str(e)}")
+        
+# GITHUB API HELPERS#
 
 async def fetch_with_headers(url, headers=None):
+    """Fetch URL with optional headers"""
     if headers:
         options = to_js({
             "method": "GET",
@@ -74,8 +131,8 @@ async def fetch_with_headers(url, headers=None):
         return await fetch(url, options)
     return await fetch(url)
 
-async def fetch_pr_data(owner, repo, pr_number, env):
-    """Fetch PR data with Authentication"""
+def get_github_headers(env):
+    """Get GitHub API headers with optional authentication"""
     github_token = getattr(env, "GITHUB_TOKEN", None)
     headers = {
         'User-Agent': 'PR-Tracker/1.0',
@@ -84,21 +141,41 @@ async def fetch_pr_data(owner, repo, pr_number, env):
     }
     if github_token:
         headers['Authorization'] = f'Bearer {github_token}'
+    return headers
+
+async def fetch_pr_data(owner, repo, pr_number, env):
+    """
+    Fetch PR data from GitHub API with authentication.
+    
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        pr_number: PR number
+        env: Worker environment
         
+    Returns:
+        dict: PR data
+        
+    Raises:
+        Exception: If GitHub API returns error
+    """
+    headers = get_github_headers(env)
+    
     pr_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
     pr_response = await fetch_with_headers(pr_url, headers)
     
     if pr_response.status >= 400:
         error_text = await pr_response.text()
-        raise Exception(f"GitHub Error {pr_response.status}: {error_text}")
+        raise Exception(f"GitHub API Error {pr_response.status}: {error_text}")
 
     pr_data = (await pr_response.json()).to_py()
     
-    # Fetch Checks
+    # Fetch check runs
     checks_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{pr_data['head']['sha']}/check-runs"
     checks_res = await fetch_with_headers(checks_url, headers)
     checks_data = (await checks_res.json()).to_py() if checks_res.status == 200 else {}
 
+    # Calculate check statistics
     passed = sum(1 for c in checks_data.get('check_runs', []) if c['conclusion'] == 'success')
     failed = sum(1 for c in checks_data.get('check_runs', []) if c['conclusion'] in ['failure', 'timed_out'])
 
@@ -117,65 +194,175 @@ async def fetch_pr_data(owner, repo, pr_number, env):
         'last_updated_at': pr_data.get('updated_at', '')
     }
 
+# API HANDLERS #
+
 async def handle_rate_limit(env):
-    """Authenticated rate limit check"""
-    github_token = getattr(env, "GITHUB_TOKEN", None)
-    headers = {'User-Agent': 'PR-Tracker/1.0'}
-    if github_token:
-        headers['Authorization'] = f'Bearer {github_token}'
+    """
+    Get GitHub API rate limit information.
     
-    res = await fetch_with_headers("https://api.github.com/rate_limit", headers)
-    data = (await res.json()).to_py()
-    core = data.get('resources', {}).get('core', {})
-    return Response.new(json.dumps(core), {'headers': {'Content-Type': 'application/json'}})
+    Returns authenticated rate limit if GITHUB_TOKEN is set,
+    otherwise returns unauthenticated rate limit.
+    
+    Returns:
+        Response with {limit, remaining, reset, reset_time}
+    """
+    try:
+        headers = get_github_headers(env)
+        
+        res = await fetch_with_headers("https://api.github.com/rate_limit", headers)
+        
+        if res.status >= 400:
+            error_text = await res.text()
+            return json_error(f"GitHub API Error: {error_text}", status=res.status)
+        
+        data = (await res.json()).to_py()
+        core = data.get('resources', {}).get('core', {})
+        
+        # Format response with additional info
+        response_data = {
+            'limit': core.get('limit', 0),
+            'remaining': core.get('remaining', 0),
+            'reset': core.get('reset', 0),
+            'reset_time': datetime.fromtimestamp(core.get('reset', 0), tz=timezone.utc).isoformat() if core.get('reset') else None,
+            'authenticated': bool(getattr(env, "GITHUB_TOKEN", None))
+        }
+        
+        return json_response(response_data)
+        
+    except Exception as e:
+        return json_error(f"Failed to fetch rate limit: {str(e)}", status=500)
 
 async def handle_add_pr(request, env):
-    data = (await request.json()).to_py()
-    parsed = parse_pr_url(data.get('pr_url', ''))
-    if not parsed:
-        return Response.new(json.dumps({'error': 'Invalid URL'}), {'status': 400})
+    """
+    Add a new PR to track.
     
-    pr_data = await fetch_pr_data(parsed['owner'], parsed['repo'], parsed['pr_number'], env)
-    db = get_db(env)
-    await db.prepare('''
-        INSERT INTO prs (pr_url, repo_owner, repo_name, pr_number, title, state, author_login, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(pr_url) DO UPDATE SET title=excluded.title, state=excluded.state
-    ''').bind(data['pr_url'], parsed['owner'], parsed['repo'], parsed['pr_number'], pr_data['title'], pr_data['state'], pr_data['author_login']).run()
-    
-    return Response.new(json.dumps({'success': True}), {'headers': {'Content-Type': 'application/json'}})
+    Validates PR URL is from OWASP-BLT organization before fetching.
+    """
+    try:
+        data = (await request.json()).to_py()
+        pr_url = data.get('pr_url', '')
+        
+        if not pr_url:
+            return json_error("PR URL is required", status=400)
+        
+        # Parse and validate PR URL (will raise ValueError if invalid or wrong org)
+        try:
+            parsed = parse_pr_url(pr_url)
+        except ValueError as e:
+            return json_error(str(e), status=400)
+        
+        # Fetch PR data from GitHub
+        pr_data = await fetch_pr_data(
+            parsed['owner'], 
+            parsed['repo'], 
+            parsed['pr_number'], 
+            env
+        )
+        
+        # Save to database
+        db = get_db(env)
+        await db.prepare('''
+            INSERT INTO prs (
+                pr_url, repo_owner, repo_name, pr_number, 
+                title, state, is_merged, mergeable_state,
+                files_changed, author_login, author_avatar,
+                checks_passed, checks_failed, checks_skipped,
+                review_status, last_updated_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(pr_url) DO UPDATE SET 
+                title=excluded.title,
+                state=excluded.state,
+                is_merged=excluded.is_merged,
+                mergeable_state=excluded.mergeable_state,
+                files_changed=excluded.files_changed,
+                checks_passed=excluded.checks_passed,
+                checks_failed=excluded.checks_failed,
+                review_status=excluded.review_status,
+                last_updated_at=excluded.last_updated_at,
+                updated_at=CURRENT_TIMESTAMP
+        ''').bind(
+            pr_url,
+            parsed['owner'],
+            parsed['repo'],
+            parsed['pr_number'],
+            pr_data['title'],
+            pr_data['state'],
+            pr_data['is_merged'],
+            pr_data['mergeable_state'],
+            pr_data['files_changed'],
+            pr_data['author_login'],
+            pr_data['author_avatar'],
+            pr_data['checks_passed'],
+            pr_data['checks_failed'],
+            pr_data['checks_skipped'],
+            pr_data['review_status'],
+            pr_data['last_updated_at']
+        ).run()
+        
+        return json_response({
+            'success': True,
+            'data': pr_data
+        })
+        
+    except Exception as e:
+        return json_error(f"Failed to add PR: {str(e)}", status=500)
+
+async def handle_list_prs(env):
+    """Get all tracked PRs"""
+    try:
+        db = get_db(env)
+        result = await db.prepare('SELECT * FROM prs ORDER BY updated_at DESC').all()
+        
+        return json_response({
+            'success': True,
+            'prs': result.results.to_py()
+        })
+        
+    except Exception as e:
+        return json_error(f"Failed to list PRs: {str(e)}", status=500)
+
+# MAIN ENTRY POINT
 
 async def on_fetch(request, env):
-    url = URL.new(request.url)
-    path = url.pathname
-    cors_headers = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-    }
-
-    if request.method == 'OPTIONS':
-        return Response.new('', {'headers': cors_headers})
-
-    if path.startswith('/api/'):
-        await init_database_schema(env)
-
-    response = None
-    if path == '/api/rate-limit':
-        response = await handle_rate_limit(env)
-    elif path == '/api/prs' and request.method == 'POST':
-        response = await handle_add_pr(request, env)
-    elif path == '/api/prs' and request.method == 'GET':
-        db = get_db(env)
-        result = await db.prepare('SELECT * FROM prs').all()
-        response = Response.new(json.dumps({'prs': result.results.to_py()}), {'headers': {'Content-Type': 'application/json'}})
-
-    if response:
-        for k, v in cors_headers.items():
-            response.headers.set(k, v)
-        return response
-
-    if hasattr(env, 'ASSETS'):
-        return await env.ASSETS.fetch(request)
+    """
+    Main entry point for Cloudflare Worker.
     
-    return Response.new('Not Found', {'status': 404})
+    Wrapped in try-except to prevent worker crashes.
+    """
+    try:
+        url = URL.new(request.url)
+        path = url.pathname
+        
+        # CORS preflight
+        if request.method == 'OPTIONS':
+            return json_response({}, status=200)
+        
+        # Initialize database for API routes
+        if path.startswith('/api/'):
+            await init_database_schema(env)
+        
+        # API Routes
+        if path == '/api/rate-limit' and request.method == 'GET':
+            return await handle_rate_limit(env)
+        
+        elif path == '/api/prs' and request.method == 'POST':
+            return await handle_add_pr(request, env)
+        
+        elif path == '/api/prs' and request.method == 'GET':
+            return await handle_list_prs(env)
+        
+        # Serve static assets
+        if hasattr(env, 'ASSETS'):
+            return await env.ASSETS.fetch(request)
+        
+        # 404 Not Found
+        return json_error("Not Found", status=404)
+        
+    except Exception as e:
+        # Global error handler to prevent worker crashes
+        print(f"Worker Error: {str(e)}")
+        return json_error(
+            f"Internal Server Error: {str(e)}", 
+            status=500
+        )
