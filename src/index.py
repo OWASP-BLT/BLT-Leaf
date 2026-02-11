@@ -113,8 +113,8 @@ async def init_database_schema(env):
             # Check if total_checks column exists
             if 'total_checks' not in column_names:
                 print("Migrating database: Adding total_checks column")
-                alter_table2 = db.prepare('ALTER TABLE prs ADD COLUMN total_checks INTEGER DEFAULT 0')
-                await alter_table2.run()
+                alter_table_total_checks = db.prepare('ALTER TABLE prs ADD COLUMN total_checks INTEGER DEFAULT 0')
+                await alter_table_total_checks.run()
         except Exception as migration_error:
             # Column may already exist or migration failed - log but continue
             print(f"Note: Migration check: {str(migration_error)}")
