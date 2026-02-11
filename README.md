@@ -37,6 +37,8 @@ BLT-Leaf/
 - 📊 **Detailed Metrics**: View merge status, files changed, check results, and review status
 - 👥 **Multi-Repo Support**: Track PRs across multiple repositories
 - 🔄 **Real-time Updates**: Refresh PR data from GitHub API
+- 🔐 **Authenticated Refresh**: Login with your GitHub username to refresh PRs
+- 📈 **Refresh Tracking**: See how many times each PR has been refreshed and by whom
 - 🎨 **Clean Interface**: Simple, GitHub-themed UI with no external frameworks
 
 ## Tech Stack
@@ -101,8 +103,9 @@ wrangler deploy
 
 ## Usage
 
-1. **Add a PR**: Enter a GitHub PR URL in the format `https://github.com/owner/repo/pull/number`
-2. **View Details**: See comprehensive PR information including:
+1. **Login**: Click "Login with GitHub" in the header and enter your GitHub username
+2. **Add a PR**: Enter a GitHub PR URL in the format `https://github.com/owner/repo/pull/number`
+3. **View Details**: See comprehensive PR information including:
    - Current state (Open/Closed/Merged)
    - Merge readiness
    - Files changed count
@@ -110,8 +113,11 @@ wrangler deploy
    - Review approval status
    - Time since last update
    - Author information
-3. **Filter by Repo**: Click on a repository in the sidebar to filter PRs
-4. **Refresh Data**: Use the refresh button to update PR information from GitHub
+   - Refresh count and users who refreshed
+4. **Filter by Repo**: Click on a repository in the sidebar to filter PRs
+5. **Refresh Data**: Use the refresh button to update PR information from GitHub (requires login)
+
+For more details on authentication and refresh tracking, see [AUTHENTICATION.md](AUTHENTICATION.md).
 
 ## API Endpoints
 
@@ -119,7 +125,9 @@ wrangler deploy
 - `GET /api/repos` - List all repositories with PRs
 - `GET /api/prs` - List all PRs (optional `?repo=owner/name` filter)
 - `POST /api/prs` - Add a new PR (body: `{"pr_url": "..."}`)
-- `POST /api/refresh` - Refresh a PR's data (body: `{"pr_id": 123}`)
+- `POST /api/refresh` - Refresh a PR's data (requires authentication, body: `{"pr_id": 123}`)
+- `GET /api/refresh-history/{pr_id}` - Get refresh history for a PR
+
 
 ## Database Schema
 
