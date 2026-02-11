@@ -348,6 +348,7 @@
                             <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Last Updated</div>
                             <div class="mt-1 text-sm text-slate-600">${escapeHtml(timeAgo(pr.last_updated_at))}</div>
                         </div>
+                        ${pr.total_checks > 0 ? `
                         <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
                             <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Checks</div>
                             <div class="mt-2 flex flex-wrap gap-2 text-xs">
@@ -365,6 +366,12 @@
                                 </div>
                             </div>
                         </div>
+                        ` : `
+                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Checks</div>
+                            <div class="mt-1 text-sm text-slate-600">No checks configured</div>
+                        </div>
+                        `}
                     </div>
 
                     <div class="mt-4 flex items-center justify-end gap-2">

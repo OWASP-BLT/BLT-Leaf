@@ -86,6 +86,7 @@ async def init_database_schema(env):
                 checks_passed INTEGER DEFAULT 0,
                 checks_failed INTEGER DEFAULT 0,
                 checks_skipped INTEGER DEFAULT 0,
+                total_checks INTEGER DEFAULT 0,
                 review_status TEXT,
                 last_updated_at TEXT,
                 last_refreshed_at TEXT,
@@ -108,9 +109,15 @@ async def init_database_schema(env):
                 print("Migrating database: Adding last_refreshed_at column")
                 alter_table = db.prepare('ALTER TABLE prs ADD COLUMN last_refreshed_at TEXT')
                 await alter_table.run()
+            
+            # Check if total_checks column exists
+            if 'total_checks' not in column_names:
+                print("Migrating database: Adding total_checks column")
+                alter_table2 = db.prepare('ALTER TABLE prs ADD COLUMN total_checks INTEGER DEFAULT 0')
+                await alter_table2.run()
         except Exception as migration_error:
             # Column may already exist or migration failed - log but continue
-            print(f"Note: Migration check for last_refreshed_at: {str(migration_error)}")
+            print(f"Note: Migration check: {str(migration_error)}")
         
         # Create indexes (idempotent with IF NOT EXISTS)
         index1 = db.prepare('CREATE INDEX IF NOT EXISTS idx_repo ON prs(repo_owner, repo_name)')
@@ -184,8 +191,10 @@ async def fetch_pr_data(owner, repo, pr_number):
         checks_passed = 0
         checks_failed = 0
         checks_skipped = 0
+        total_checks = 0
         
-        if 'check_runs' in checks_data:
+        if 'check_runs' in checks_data and checks_data.get('total_count', 0) > 0:
+            total_checks = checks_data.get('total_count', 0)
             for check in checks_data['check_runs']:
                 if check['conclusion'] == 'success':
                     checks_passed += 1
@@ -225,6 +234,7 @@ async def fetch_pr_data(owner, repo, pr_number):
             'checks_passed': checks_passed,
             'checks_failed': checks_failed,
             'checks_skipped': checks_skipped,
+            'total_checks': total_checks,
             'review_status': review_status,
             'last_updated_at': pr_data.get('updated_at', '')
         }
@@ -262,8 +272,8 @@ async def handle_add_pr(request, env):
             INSERT INTO prs (pr_url, repo_owner, repo_name, pr_number, title, state, 
                            is_merged, mergeable_state, files_changed, author_login, 
                            author_avatar, checks_passed, checks_failed, checks_skipped, 
-                           review_status, last_updated_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                           total_checks, review_status, last_updated_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(pr_url) DO UPDATE SET
                 title = excluded.title,
                 state = excluded.state,
@@ -273,6 +283,7 @@ async def handle_add_pr(request, env):
                 checks_passed = excluded.checks_passed,
                 checks_failed = excluded.checks_failed,
                 checks_skipped = excluded.checks_skipped,
+                total_checks = excluded.total_checks,
                 review_status = excluded.review_status,
                 last_updated_at = excluded.last_updated_at,
                 updated_at = CURRENT_TIMESTAMP
@@ -291,6 +302,7 @@ async def handle_add_pr(request, env):
             pr_data['checks_passed'],
             pr_data['checks_failed'],
             pr_data['checks_skipped'],
+            pr_data['total_checks'],
             pr_data['review_status'],
             pr_data['last_updated_at']
         )
@@ -389,7 +401,7 @@ async def handle_refresh_pr(request, env):
             UPDATE prs SET
                 title = ?, state = ?, is_merged = ?, mergeable_state = ?,
                 files_changed = ?, checks_passed = ?, checks_failed = ?,
-                checks_skipped = ?, review_status = ?, last_updated_at = ?,
+                checks_skipped = ?, total_checks = ?, review_status = ?, last_updated_at = ?,
                 last_refreshed_at = ?,
                 updated_at = ?
             WHERE id = ?
@@ -402,6 +414,7 @@ async def handle_refresh_pr(request, env):
             pr_data['checks_passed'],
             pr_data['checks_failed'],
             pr_data['checks_skipped'],
+            pr_data['total_checks'],
             pr_data['review_status'],
             pr_data['last_updated_at'],
             current_timestamp,
