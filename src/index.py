@@ -1,10 +1,8 @@
-from js import Response, fetch, Headers, URL, Object, Date, btoa
+from js import Response, fetch, Headers, URL, Object, Date
 from pyodide.ffi import to_js
 import json
 import re
 from datetime import datetime, timezone
-import secrets
-import hashlib
 
 # Track if schema initialization has been attempted in this worker instance
 # This is safe in Cloudflare Workers Python as each isolate runs single-threaded
