@@ -41,38 +41,36 @@ def json_error(message, status=400):
 
 # UTILITIES
 
-def parse_pr_url(pr_url):
+def parse_pr_url(url):
     """
-    Parse GitHub PR URL and validate it's from OWASP-BLT organization.
-    
-    Args:
-        pr_url: GitHub PR URL string
-        
-    Returns:
-        dict with owner, repo, pr_number
-        
-    Raises:
-        ValueError: If URL is invalid or not from OWASP-BLT organization
+    Validates that the URL is a GitHub PR and 
+    strictly belongs to OWASP-BLT.
     """
-    pattern = r'https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)'
-    match = re.match(pattern, pr_url)
-    
-    if not match:
-        raise ValueError("Invalid GitHub PR URL format. Expected: https://github.com/owner/repo/pull/number")
-    
-    owner = match.group(1)
-    repo = match.group(2)
-    pr_number = int(match.group(3))
-    
-    # OWASP-BLT validation (case-insensitive)
-    if owner.lower() != 'owasp-blt':
-        raise ValueError("Only repositories under the OWASP-BLT organization are allowed.")
-    
-    return {
-        'owner': owner,
-        'repo': repo,
-        'pr_number': pr_number
-    }
+    try:
+        # Standardize the URL by removing trailing slashes
+        parts = url.strip().rstrip('/').split('/')
+        
+        # Validation: Must be a GitHub URL with enough parts
+        # Format: https://github.com/OWNER/REPO/pull/NUMBER
+        if len(parts) < 7 or 'github.com' not in parts[2]:
+            raise ValueError("Invalid GitHub URL format. Please provide a full PR link.")
+        
+        owner = parts[3]
+        repo = parts[4]
+        pr_number = parts[6]
+        
+        # STRICT OWNER CHECK
+        if owner.upper() != "OWASP-BLT":
+            raise ValueError(f"Access Denied: Owner '{owner}' is not authorized. Only 'OWASP-BLT' repositories are allowed.")
+            
+        return {
+            'owner': owner,
+            'repo': repo,
+            'pr_number': pr_number
+        }
+    except Exception as e:
+        # Pass the specific error message up
+        raise e
 
 def get_db(env):
     """Get database binding from environment"""
@@ -323,46 +321,28 @@ async def handle_list_prs(env):
         return json_error(f"Failed to list PRs: {str(e)}", status=500)
 
 # MAIN ENTRY POINT
-
 async def on_fetch(request, env):
-    """
-    Main entry point for Cloudflare Worker.
+    url = URL.new(request.url)
+    # Use rstrip('/') so that /api/prs/ and /api/prs both work
+    path = url.pathname.rstrip('/')
     
-    Wrapped in try-except to prevent worker crashes.
-    """
+    # ... (CORS Headers logic) ...
+
     try:
-        url = URL.new(request.url)
-        path = url.pathname
-        
-        # CORS preflight
-        if request.method == 'OPTIONS':
-            return json_response({}, status=200)
-        
-        # Initialize database for API routes
-        if path.startswith('/api/'):
-            await init_database_schema(env)
-        
-        # API Routes
-        if path == '/api/rate-limit' and request.method == 'GET':
+        if path == '/api/rate-limit':
             return await handle_rate_limit(env)
-        
-        elif path == '/api/prs' and request.method == 'POST':
-            return await handle_add_pr(request, env)
-        
-        elif path == '/api/prs' and request.method == 'GET':
-            return await handle_list_prs(env)
-        
-        # Serve static assets
-        if hasattr(env, 'ASSETS'):
-            return await env.ASSETS.fetch(request)
-        
-        # 404 Not Found
-        return json_error("Not Found", status=404)
+            
+        elif path == '/api/prs':
+            if request.method == 'POST':
+                return await handle_add_pr(request, env)
+            elif request.method == 'GET':
+                db = get_db(env)
+                result = await db.prepare("SELECT * FROM prs WHERE repo_owner = 'OWASP-BLT'").all()
+                return json_response({'prs': result.results.to_py()})
+
+        # Final Fallback
+        return Response.new('Endpoint Not Found', {'status': 404})
         
     except Exception as e:
-        # Global error handler to prevent worker crashes
-        print(f"Worker Error: {str(e)}")
-        return json_error(
-            f"Internal Server Error: {str(e)}", 
-            status=500
-        )
+        # This will send the "Only OWASP-BLT allowed" message to the red bar
+        return json_error(str(e), 400)
