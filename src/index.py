@@ -138,11 +138,17 @@ async def fetch_with_headers(url, headers=None):
 
 async def fetch_pr_data(owner, repo, pr_number):
     """Fetch PR data from GitHub API"""
+    # Get token from secrets 
+    github_token = getattr(env, "GITHUB_TOKEN", None)
+    
     headers = {
         'User-Agent': 'PR-Tracker/1.0',
         'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28'
     }
+
+    if github_token:
+        headers['Authorization'] = f'Bearer {github_token}'
         
     try:
         # Fetch PR details
@@ -251,7 +257,7 @@ async def handle_add_pr(request, env):
                               {'status': 400, 'headers': {'Content-Type': 'application/json'}})
         
         # Fetch PR data from GitHub
-        pr_data = await fetch_pr_data(parsed['owner'], parsed['repo'], parsed['pr_number'])
+        pr_data = await fetch_pr_data(parsed['owner'], parsed['repo'], parsed['pr_number'], env)
         if not pr_data:
             return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
                               {'status': 500, 'headers': {'Content-Type': 'application/json'}})
@@ -375,7 +381,7 @@ async def handle_refresh_pr(request, env):
         result = result.to_py()
         
         # Fetch fresh data from GitHub
-        pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'])
+        pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'], env)
         if not pr_data:
             return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
                               {'status': 500, 'headers': {'Content-Type': 'application/json'}})
@@ -446,13 +452,15 @@ async def handle_rate_limit(env):
                     'Cache-Control': f'public, max-age={_RATE_LIMIT_CACHE_TTL}'
                 }}
             )
-        
+        github_token = getattr(env, "GITHUB_TOKEN", None)
         headers = {
             'User-Agent': 'PR-Tracker/1.0',
             'Accept': 'application/vnd.github+json',
             'X-GitHub-Api-Version': '2022-11-28'
         }
-        
+        if github_token:
+            headers['Authorization'] = f'Bearer {github_token}
+            
         # Fetch rate limit from GitHub API
         rate_limit_url = "https://api.github.com/rate_limit"
         response = await fetch_with_headers(rate_limit_url, headers)
