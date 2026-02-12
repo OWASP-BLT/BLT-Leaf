@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS prs (
     checks_passed INTEGER DEFAULT 0,
     checks_failed INTEGER DEFAULT 0,
     checks_skipped INTEGER DEFAULT 0,
+    total_checks INTEGER DEFAULT 0,
     review_status TEXT,
     last_updated_at TEXT,
     last_refreshed_at TEXT,
@@ -31,3 +32,4 @@ CREATE INDEX IF NOT EXISTS idx_pr_number ON prs(pr_number);
 -- Migration for existing databases (if needed manually)
 -- Run this if the automatic migration in init_database_schema fails:
 -- ALTER TABLE prs ADD COLUMN last_refreshed_at TEXT;
+-- ALTER TABLE prs ADD COLUMN total_checks INTEGER DEFAULT 0;
