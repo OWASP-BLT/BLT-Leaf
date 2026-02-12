@@ -611,6 +611,10 @@ async def on_fetch(request, env):
     
     if path == '/api/rate-limit' and request.method == 'GET':
         response = await handle_rate_limit(env)
+        for key, value in cors_header.items():
+            response.headers.set(key, value)
+        return response
+        
     if path == '/api/status' and request.method == 'GET':
         response = await handle_status(env)
         for key, value in cors_headers.items():
