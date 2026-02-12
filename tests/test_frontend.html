@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>BLT-Leaf Frontend Tests</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 900px; 
+            margin: 20px auto; 
+            padding: 20px;
+        }
+        .test-suite { 
+            margin: 20px 0; 
+            border: 1px solid #ddd; 
+            padding: 15px; 
+            border-radius: 5px;
+        }
+        .test-case { 
+            margin: 10px 0; 
+            padding: 8px; 
+            border-left: 3px solid #ccc;
+        }
+        .test-case.pass { 
+            background: #d4edda; 
+            border-color: #28a745; 
+        }
+        .test-case.fail { 
+            background: #f8d7da; 
+            border-color: #dc3545; 
+        }
+        .summary { 
+            font-weight: bold; 
+            margin: 20px 0; 
+            padding: 15px; 
+            border-radius: 5px;
+        }
+        .summary.pass { 
+            background: #d4edda; 
+            color: #155724;
+        }
+        .summary.fail { 
+            background: #f8d7da; 
+            color: #721c24;
+        }
+        h1 { 
+            color: #333; 
+        }
+        h2 { 
+            color: #555; 
+            margin-top: 0;
+        }
+        .error-details {
+            font-family: monospace;
+            font-size: 12px;
+            color: #721c24;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>BLT-Leaf Frontend Tests</h1>
+    <div id="test-results"></div>
+
+    <script>
+        // Test framework
+        const tests = [];
+        let currentSuite = null;
+
+        function describe(name, fn) {
+            currentSuite = { name, tests: [] };
+            tests.push(currentSuite);
+            fn();
+            currentSuite = null;
+        }
+
+        function it(description, fn) {
+            if (!currentSuite) {
+                throw new Error('it() must be called within describe()');
+            }
+            currentSuite.tests.push({ description, fn });
+        }
+
+        function expect(actual) {
+            return {
+                toBe(expected) {
+                    if (actual !== expected) {
+                        throw new Error(`Expected ${JSON.stringify(expected)}, but got ${JSON.stringify(actual)}`);
+                    }
+                },
+                toEqual(expected) {
+                    const actualStr = JSON.stringify(actual);
+                    const expectedStr = JSON.stringify(expected);
+                    if (actualStr !== expectedStr) {
+                        throw new Error(`Expected ${expectedStr}, but got ${actualStr}`);
+                    }
+                },
+                toContain(substring) {
+                    if (!actual.includes(substring)) {
+                        throw new Error(`Expected "${actual}" to contain "${substring}"`);
+                    }
+                },
+                toBeTruthy() {
+                    if (!actual) {
+                        throw new Error(`Expected ${JSON.stringify(actual)} to be truthy`);
+                    }
+                }
+            };
+        }
+
+        // Copy functions from index.html to test
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function timeAgo(dateString) {
+            const date = new Date(dateString);
+            const now = new Date();
+            const seconds = Math.floor((now - date) / 1000);
+            const intervals = {
+                year: 31536000,
+                month: 2592000,
+                week: 604800,
+                day: 86400,
+                hour: 3600,
+                minute: 60,
+                second: 1
+            };
+
+            for (const [unit, value] of Object.entries(intervals)) {
+                const interval = Math.floor(seconds / value);
+                if (interval >= 1) {
+                    return interval === 1 ? `1 ${unit} ago` : `${interval} ${unit}s ago`;
+                }
+            }
+            return 'just now';
+        }
+
+        // Define tests
+        describe('escapeHtml', () => {
+            it('should escape HTML special characters', () => {
+                const result = escapeHtml('<script>alert("XSS")</script>');
+                expect(result).toContain('&lt;script&gt;');
+                expect(result).toContain('&lt;/script&gt;');
+            });
+
+            it('should escape ampersands', () => {
+                const result = escapeHtml('Tom & Jerry');
+                expect(result).toBe('Tom &amp; Jerry');
+            });
+
+            it('should escape quotes', () => {
+                const result = escapeHtml('She said "Hello"');
+                expect(result).toContain('&quot;');
+            });
+
+            it('should return empty string for empty input', () => {
+                const result = escapeHtml('');
+                expect(result).toBe('');
+            });
+
+            it('should handle text without special characters', () => {
+                const result = escapeHtml('Hello World');
+                expect(result).toBe('Hello World');
+            });
+        });
+
+        describe('timeAgo', () => {
+            it('should return "just now" for very recent dates', () => {
+                const now = new Date();
+                const result = timeAgo(now.toISOString());
+                expect(result).toBe('just now');
+            });
+
+            it('should return seconds ago', () => {
+                const date = new Date();
+                date.setSeconds(date.getSeconds() - 30);
+                const result = timeAgo(date.toISOString());
+                expect(result).toContain('second');
+                expect(result).toContain('ago');
+            });
+
+            it('should return minutes ago', () => {
+                const date = new Date();
+                date.setMinutes(date.getMinutes() - 5);
+                const result = timeAgo(date.toISOString());
+                expect(result).toContain('minute');
+                expect(result).toContain('ago');
+            });
+
+            it('should return hours ago', () => {
+                const date = new Date();
+                date.setHours(date.getHours() - 3);
+                const result = timeAgo(date.toISOString());
+                expect(result).toContain('hour');
+                expect(result).toContain('ago');
+            });
+
+            it('should return days ago', () => {
+                const date = new Date();
+                date.setDate(date.getDate() - 2);
+                const result = timeAgo(date.toISOString());
+                expect(result).toContain('day');
+                expect(result).toContain('ago');
+            });
+
+            it('should use singular form for 1 unit', () => {
+                const date = new Date();
+                date.setHours(date.getHours() - 1);
+                const result = timeAgo(date.toISOString());
+                expect(result).toBe('1 hour ago');
+            });
+
+            it('should use plural form for multiple units', () => {
+                const date = new Date();
+                date.setHours(date.getHours() - 2);
+                const result = timeAgo(date.toISOString());
+                expect(result).toBe('2 hours ago');
+            });
+        });
+
+        // Run tests
+        function runTests() {
+            const resultsDiv = document.getElementById('test-results');
+            let totalTests = 0;
+            let passedTests = 0;
+            let failedTests = 0;
+
+            tests.forEach(suite => {
+                const suiteDiv = document.createElement('div');
+                suiteDiv.className = 'test-suite';
+                
+                const suiteTitle = document.createElement('h2');
+                suiteTitle.textContent = suite.name;
+                suiteDiv.appendChild(suiteTitle);
+
+                suite.tests.forEach(test => {
+                    totalTests++;
+                    const testDiv = document.createElement('div');
+                    testDiv.className = 'test-case';
+
+                    try {
+                        test.fn();
+                        testDiv.classList.add('pass');
+                        testDiv.innerHTML = `✓ ${test.description}`;
+                        passedTests++;
+                    } catch (error) {
+                        testDiv.classList.add('fail');
+                        testDiv.innerHTML = `✗ ${test.description}`;
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'error-details';
+                        errorDiv.textContent = error.message;
+                        testDiv.appendChild(errorDiv);
+                        failedTests++;
+                    }
+
+                    suiteDiv.appendChild(testDiv);
+                });
+
+                resultsDiv.appendChild(suiteDiv);
+            });
+
+            // Add summary
+            const summaryDiv = document.createElement('div');
+            summaryDiv.className = `summary ${failedTests === 0 ? 'pass' : 'fail'}`;
+            summaryDiv.textContent = `Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`;
+            resultsDiv.insertBefore(summaryDiv, resultsDiv.firstChild);
+
+            // Exit with error code if running in a test environment
+            if (typeof process !== 'undefined' && process.exit) {
+                process.exit(failedTests > 0 ? 1 : 0);
+            }
+        }
+
+        // Run tests when page loads
+        window.addEventListener('load', runTests);
+    </script>
+</body>
+</html>

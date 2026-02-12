@@ -10,3 +10,6 @@ dist/
 *.pyc
 __pycache__/
 .pytest_cache/
+test-results/
+playwright-report/
+playwright/.cache/
