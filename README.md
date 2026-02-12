@@ -155,9 +155,47 @@ The application uses the GitHub REST API to fetch PR information. No authenticat
 
 For private repositories or higher rate limits, you can add a GitHub token to the worker environment variables.
 
+## Testing
+
+This project includes comprehensive automated tests that run on every push and pull request.
+
+### Running Tests Locally
+
+```bash
+# Run all tests
+npm test
+
+# Or run Python tests directly
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+### Test Coverage
+
+- **Backend Python Tests** (22 tests)
+  - URL parsing and validation
+  - Configuration file validation
+  - Database schema validation
+- **Frontend JavaScript Tests** (manual)
+  - HTML escaping (security)
+  - Time formatting utilities
+  - Open `tests/test_frontend.html` in a browser to run
+
+### Continuous Integration
+
+Tests automatically run via GitHub Actions on:
+- Push to main, master, or develop branches
+- Pull requests to these branches
+
+See the [tests README](tests/README.md) for more details.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+When contributing:
+1. Ensure all tests pass: `npm test`
+2. Add tests for new functionality
+3. Follow the existing code style
 
 ## License
 
