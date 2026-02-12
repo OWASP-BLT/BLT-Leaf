@@ -79,9 +79,5 @@ class TestParsePRUrl(unittest.TestCase):
         self.assertEqual(result['owner'], 'my-org_123')
         self.assertEqual(result['repo'], 'my-repo_456')
 
-
-
-
-
 if __name__ == '__main__':
     unittest.main()

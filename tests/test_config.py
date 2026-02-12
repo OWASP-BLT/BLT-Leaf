@@ -117,6 +117,5 @@ class TestSchemaFields(unittest.TestCase):
         self.assertIn('CREATE INDEX', self.schema_content)
         self.assertIn('idx_repo', self.schema_content)
 
-
 if __name__ == '__main__':
     unittest.main()
