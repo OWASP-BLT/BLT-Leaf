@@ -1,6 +1,10 @@
 """
 Helper functions extracted for testing.
 These functions have no dependencies on Cloudflare Workers APIs.
+
+Note: These functions are duplicated from src/index.py for testing purposes.
+The main application (index.py) keeps its own copies since it runs in a 
+Cloudflare Workers environment which may have import restrictions.
 """
 import re
 
