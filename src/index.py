@@ -148,11 +148,12 @@ async def fetch_pr_data(owner, repo, pr_number):
         # Fetch PR details
         pr_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
         pr_response = await fetch_with_headers(pr_url, headers)
-        
+        # Read the response body once and store it
+        response_body = await pr_response.text()
+
         if pr_response.status == 403 or pr_response.status == 429:
             rl_limit = pr_response.headers.get('x-ratelimit-limit', 'unknown')
             rl_remaining = pr_response.headers.get('x-ratelimit-remaining', 'unknown')
-            error_body = await pr_response.text()
             error_body = await pr_response.text()
             print(f"DEBUG: GitHub API Error. Status: {pr_response.status}. Body: {error_body}")
             print(f"DEBUG: Sent headers due to error: User-Agent={headers.get('User-Agent', 'MISSING')}")
@@ -163,22 +164,25 @@ async def fetch_pr_data(owner, repo, pr_number):
             error_msg = await pr_response.text()
             raise Exception(f"GitHub API Error: {pr_response.status} {error_msg}")
             
-        pr_data = (await pr_response.json()).to_py()
+        pr_data = json.loads(response_body)
         
         # Fetch PR files
         files_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files"
         files_response = await fetch_with_headers(files_url, headers)
-        files_data = (await files_response.json()).to_py() if files_response.status == 200 else []
+        files_body = await files_response.text()
+        files_data = json.loads(files_body) if files_response.status == 200 else []
         
         # Fetch PR reviews
         reviews_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
         reviews_response = await fetch_with_headers(reviews_url, headers)
-        reviews_data = (await reviews_response.json()).to_py() if reviews_response.status == 200 else []
+        reviews_body = await reviews_response.text()
+        reviews_data = json.loads(reviews_body) if reviews_response.status == 200 else []
         
         # Fetch check runs
         checks_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{pr_data['head']['sha']}/check-runs"
         checks_response = await fetch_with_headers(checks_url, headers)
-        checks_data = (await checks_response.json()).to_py() if checks_response.status == 200 else {}
+        checks_body = await checks_response.text()
+        checks_data = json.loads(checks_body) if checks_response.status == 200 else {}
         
         # Process check runs
         checks_passed = 0
