@@ -38,7 +38,7 @@
                 <div class="hidden items-center gap-2 sm:flex pl-4 border-l border-slate-200 dark:border-slate-700 h-8">
                     <span class="text-[10px] font-medium text-slate-500 dark:text-slate-400">API Limit:</span>
                     <div class="rate-limit-bar h-1.5 w-20 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                        <div class="h-full w-0 rounded-full bg-[#E10000] transition-all duration-300" id="rateLimitFill"></div>
+                        <div class="h-full w-0 rounded-full bg-green-500 transition-all duration-300" id="rateLimitFill"></div>
                     </div>
                     <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400" id="rateLimitText">N/A</span>
                 </div>
@@ -141,6 +141,18 @@
                     timestamp: Date.now()
                 };
                 localStorage.setItem('prReadinessData', JSON.stringify(data));
+                
+                // Also update the PR object in allPrs for sorting
+                const pr = allPrs.find(p => p.id === prId);
+                if (pr) {
+                    pr.ready_score = readiness.overall_score;
+                    pr.ci_score = readiness.ci_score;
+                    pr.review_score = readiness.review_score;
+                    pr.response_score = parseFloat(reviewHealth.response_rate_display.replace('%', ''));
+                    pr.feedback_score = reviewHealth.total_feedback > 0 ? 
+                        (reviewHealth.responded_feedback / reviewHealth.total_feedback) * 100 : 100;
+                    pr.issues_count = (readiness.blockers?.length || 0) + (readiness.warnings?.length || 0);
+                }
             } catch (error) {
                 console.error('Error saving readiness data:', error);
             }
@@ -216,7 +228,7 @@
                     } else if (percentageRemaining <= 50) {
                         fillEl.classList.add('bg-amber-500');
                     } else {
-                        fillEl.classList.add('bg-[#E10000]');
+                        fillEl.classList.add('bg-green-500');
                     }
                 }
                 
@@ -240,7 +252,7 @@
             }
             
             // Columns that should use numeric sorting
-            const numericColumns = ['files_changed', 'checks_passed', 'checks_failed', 'checks_skipped', 'pr_number'];
+            const numericColumns = ['files_changed', 'checks_passed', 'checks_failed', 'checks_skipped', 'pr_number', 'ready_score', 'ci_score', 'review_score', 'response_score', 'feedback_score', 'issues_count'];
 
             allPrs.sort((a, b) => {
                 let aVal = a[column];
@@ -366,6 +378,20 @@
 
                 allPrs = data.prs;
                 
+                // Attach readiness data from localStorage to each PR for sorting
+                allPrs.forEach(pr => {
+                    const storedData = loadReadinessData(pr.id);
+                    if (storedData && storedData.readiness && storedData.reviewHealth) {
+                        pr.ready_score = storedData.readiness.overall_score;
+                        pr.ci_score = storedData.readiness.ci_score;
+                        pr.review_score = storedData.readiness.review_score;
+                        pr.response_score = parseFloat(storedData.reviewHealth.response_rate_display.replace('%', ''));
+                        pr.feedback_score = storedData.reviewHealth.total_feedback > 0 ? 
+                            (storedData.reviewHealth.responded_feedback / storedData.reviewHealth.total_feedback) * 100 : 100;
+                        pr.issues_count = (storedData.readiness.blockers?.length || 0) + (storedData.readiness.warnings?.length || 0);
+                    }
+                });
+                
                 // Apply search filter if exists
                 const searchTerm = document.getElementById('prSearchInput').value;
                 if(searchTerm) {
@@ -455,23 +481,35 @@
                                         <span class="truncate">Checks</span> ${getSortIcon('checks_passed')}
                                     </div>
                                 </th>
-                                <th class="px-2 py-3 text-center" style="min-width: 70px;" title="Overall Readiness Score - Calculated: (CI Score * 45%) + (Review Score * 55%)">
-                                    <div class="truncate">Ready</div>
+                                <th class="cursor-pointer px-2 py-3 text-center hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('ready_score')" style="min-width: 70px;" title="Overall Readiness Score - Calculated: (CI Score * 45%) + (Review Score * 55%)">
+                                    <div class="flex items-center justify-center gap-1 truncate">
+                                        <span class="truncate">Ready</span> ${getSortIcon('ready_score')}
+                                    </div>
                                 </th>
-                                <th class="px-2 py-3 text-center" style="min-width: 50px;" title="CI Score - Calculated from check-runs API based on pass/fail/skip counts">
-                                    <div class="truncate">CI</div>
+                                <th class="cursor-pointer px-2 py-3 text-center hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('ci_score')" style="min-width: 50px;" title="CI Score - Calculated from check-runs API based on pass/fail/skip counts">
+                                    <div class="flex items-center justify-center gap-1 truncate">
+                                        <span class="truncate">CI</span> ${getSortIcon('ci_score')}
+                                    </div>
                                 </th>
-                                <th class="px-2 py-3 text-center" style="min-width: 60px;" title="Review Score - Calculated from timeline analysis (commits, reviews, comments)">
-                                    <div class="truncate">Review</div>
+                                <th class="cursor-pointer px-2 py-3 text-center hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('review_score')" style="min-width: 60px;" title="Review Score - Calculated from timeline analysis (commits, reviews, comments)">
+                                    <div class="flex items-center justify-center gap-1 truncate">
+                                        <span class="truncate">Review</span> ${getSortIcon('review_score')}
+                                    </div>
                                 </th>
-                                <th class="px-2 py-3 text-center" style="min-width: 70px;" title="Response Rate - Calculated from timeline analysis using GET /repos/{owner}/{repo}/pulls/{pr_number}/commits and GET /repos/{owner}/{repo}/issues/{pr_number}/comments">
-                                    <div class="truncate">Response</div>
+                                <th class="cursor-pointer px-2 py-3 text-center hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('response_score')" style="min-width: 70px;" title="Response Rate - Calculated from timeline analysis using GET /repos/{owner}/{repo}/pulls/{pr_number}/commits and GET /repos/{owner}/{repo}/issues/{pr_number}/comments">
+                                    <div class="flex items-center justify-center gap-1 truncate">
+                                        <span class="truncate">Response</span> ${getSortIcon('response_score')}
+                                    </div>
                                 </th>
-                                <th class="px-2 py-3 text-center" style="min-width: 80px;" title="Feedback Responded/Total - Calculated from GET /repos/{owner}/{repo}/pulls/{pr_number}/comments (review comments on diff)">
-                                    <div class="truncate">Feedback</div>
+                                <th class="cursor-pointer px-2 py-3 text-center hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('feedback_score')" style="min-width: 80px;" title="Feedback Responded/Total - Calculated from GET /repos/{owner}/{repo}/pulls/{pr_number}/comments (review comments on diff)">
+                                    <div class="flex items-center justify-center gap-1 truncate">
+                                        <span class="truncate">Feedback</span> ${getSortIcon('feedback_score')}
+                                    </div>
                                 </th>
-                                <th class="px-2 py-3" style="min-width: 200px;" title="Blockers, Warnings, and Recommendations - Calculated from readiness analysis combining all API data">
-                                    <div class="truncate">Issues</div>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('issues_count')" style="min-width: 200px;" title="Blockers, Warnings, and Recommendations - Calculated from readiness analysis combining all API data">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">Issues</span> ${getSortIcon('issues_count')}
+                                    </div>
                                 </th>
                                 <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('last_updated_at')" style="min-width: 90px;" title="API: GET /repos/{owner}/{repo}/pulls/{pr_number} (updated_at field)">
                                     <div class="flex items-center gap-1 truncate">
@@ -489,150 +527,213 @@
 
             const tbody = document.getElementById('prTableBody');
             allPrs.forEach(pr => {
-                let stateBadge = '';
-                if (pr.is_merged) {
-                    stateBadge = '<span class="inline-flex rounded-full border border-[#f5b0b0] bg-[#fff1f1] px-2 py-0.5 text-xs font-semibold text-[#BC0000] dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Merged</span>';
-                } else if (pr.state === 'open') {
-                    stateBadge = '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">Open</span>';
-                } else {
-                    stateBadge = '<span class="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Closed</span>';
-                }
-
-                let reviewBadge = '';
-                if (pr.review_status === 'approved') {
-                    reviewBadge = '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">Approved</span>';
-                } else if (pr.review_status === 'changes_requested') {
-                    reviewBadge = '<span class="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Changes</span>';
-                } else if (pr.review_status === 'pending') {
-                    reviewBadge = '<span class="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">Pending</span>';
-                } else {
-                    reviewBadge = '<span class="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-300">None</span>';
-                }
-
-                let mergeableText = pr.mergeable_state || 'unknown';
-                if (mergeableText === 'clean') mergeableText = 'Ready';
-                else if (mergeableText === 'dirty') mergeableText = 'Conflicts';
-                else if (mergeableText === 'blocked') mergeableText = 'Blocked';
-                else if (mergeableText === 'unstable') mergeableText = 'Unstable';
-
-                const avatarUrl = pr.author_avatar &&
-                    (pr.author_avatar.startsWith('https://avatars.githubusercontent.com/') || pr.author_avatar.startsWith('https://github.com/'))
-                    ? pr.author_avatar
-                    : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32"%3E%3Crect width="32" height="32" fill="%23E2E8F0"/%3E%3C/svg%3E';
-
-                const row = document.createElement('tr');
-                row.className = 'hover:bg-slate-50 dark:hover:bg-slate-900/50';
-                row.id = `pr-row-${pr.id}`;
-                row.innerHTML = `
-                    <td class="px-2 py-3">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(pr.author_login)}" class="h-6 w-6 rounded-full border border-slate-200 dark:border-slate-600 flex-shrink-0" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22%3E%3Crect width=%2224%22 height=%2224%22 fill=%22%23E2E8F0%22/%3E%3C/svg%3E'">
-                            <a href="${escapeHtml(pr.pr_url)}" target="_blank" rel="noopener noreferrer" class="font-medium text-slate-900 hover:text-[#BC0000] dark:text-slate-100 dark:hover:text-red-400 truncate text-xs" title="${escapeHtml(pr.title)}">${escapeHtml(pr.title)}</a>
-                        </div>
-                    </td>
-                    <td class="px-2 py-3 text-slate-600 dark:text-slate-400">
-                        <div class="truncate text-xs">${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}</div>
-                        <div class="text-xs text-slate-500 dark:text-slate-500">#${pr.pr_number}</div>
-                    </td>
-                    <td class="px-2 py-3 text-slate-600 dark:text-slate-400 text-xs truncate">${escapeHtml(pr.author_login)}</td>
-                    <td class="px-2 py-3">${reviewBadge}</td>
-                    <td class="px-2 py-3 text-slate-700 dark:text-slate-300 text-xs truncate">${escapeHtml(mergeableText)}</td>
-                    <td class="px-2 py-3 text-center text-slate-700 dark:text-slate-300 text-xs">${pr.files_changed}</td>
-                    <td class="px-2 py-3">
-                        <div class="flex flex-wrap gap-1 text-xs">
-                            <span class="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">
-                                <i class="fas fa-check-circle"></i>${pr.checks_passed}
-                            </span>
-                            ${pr.checks_failed > 0 ? `<a href="https://github.com/${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}/pull/${escapeHtml(String(pr.pr_number))}/checks" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-red-700 hover:border-red-300 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
-                                <i class="fas fa-times-circle"></i>${escapeHtml(String(pr.checks_failed))}
-                            </a>` : `<span class="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
-                                <i class="fas fa-times-circle"></i>${pr.checks_failed}
-                            </span>`}
-                            ${pr.checks_skipped > 0 ? `<span class="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-400">
-                                <i class="fas fa-minus-circle"></i>${pr.checks_skipped}
-                            </span>` : ''}
-                        </div>
-                    </td>
-                    <td class="px-2 py-3 text-center" id="readiness-overall-${pr.id}">
-                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
-                    </td>
-                    <td class="px-2 py-3 text-center" id="readiness-ci-${pr.id}">
-                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
-                    </td>
-                    <td class="px-2 py-3 text-center" id="readiness-review-${pr.id}">
-                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
-                    </td>
-                    <td class="px-2 py-3 text-center" id="readiness-response-${pr.id}">
-                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
-                    </td>
-                    <td class="px-2 py-3 text-center" id="readiness-feedback-${pr.id}">
-                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
-                    </td>
-                    <td class="px-2 py-3" id="readiness-issues-${pr.id}">
-                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
-                    </td>
-                    <td class="px-2 py-3 text-xs text-slate-600 dark:text-slate-400 truncate">${escapeHtml(timeAgo(pr.last_updated_at))}</td>
-                    <td class="px-2 py-3 text-center">
-                        <button class="readiness-btn rounded-md border border-[#E10000] bg-white px-3 py-2 text-xs font-semibold text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30" data-pr-id="${pr.id}" title="Analyze Readiness">
-                            <i class="fas fa-chart-line mr-1"></i>Analyze
-                        </button>
-                        <div class="mt-1">
-                            <button class="refresh-link text-xs text-slate-500 hover:text-[#E10000] dark:text-slate-400 dark:hover:text-red-400 underline decoration-dotted" data-pr-id="${pr.id}" title="Refresh PR data from GitHub">
-                                ↻ Refresh
-                            </button>
-                        </div>
-                    </td>
-                `;
+                const row = createPrRow(pr);
                 tbody.appendChild(row);
 
                 // Load and display stored readiness data if available
                 const storedData = loadReadinessData(pr.id);
                 if (storedData && storedData.readiness && storedData.reviewHealth) {
                     updateInlineCells(pr.id, storedData.readiness, storedData.reviewHealth);
-                    // Update button to show it was analyzed
-                    const analyzeBtn = row.querySelector('.readiness-btn');
-                    if (analyzeBtn) {
-                        analyzeBtn.innerHTML = '<i class="fas fa-check mr-1"></i>Analyzed';
+                    // Update button to show it was updated
+                    const updateBtn = row.querySelector('.update-btn');
+                    if (updateBtn) {
+                        updateBtn.innerHTML = '<i class="fas fa-check mr-1"></i>Updated';
                     }
                 }
             });
 
-            document.querySelectorAll('.readiness-btn').forEach(btn => {
+            document.querySelectorAll('.update-btn').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
                     const prId = e.currentTarget.dataset.prId;
-                    await checkReadiness(prId, e.currentTarget);
-                });
-            });
-
-            document.querySelectorAll('.refresh-link').forEach(link => {
-                link.addEventListener('click', async (e) => {
-                    const prId = e.currentTarget.dataset.prId;
-                    await refreshPr(prId, e.currentTarget);
+                    await updatePr(prId, e.currentTarget);
                 });
             });
         }
 
-        async function checkReadiness(prId, button) {
+        function createPrRow(pr) {
+            let stateBadge = '';
+            if (pr.is_merged) {
+                stateBadge = '<span class="inline-flex rounded-full border border-[#f5b0b0] bg-[#fff1f1] px-2 py-0.5 text-xs font-semibold text-[#BC0000] dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Merged</span>';
+            } else if (pr.state === 'open') {
+                stateBadge = '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">Open</span>';
+            } else {
+                stateBadge = '<span class="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Closed</span>';
+            }
+
+            let reviewBadge = '';
+            if (pr.review_status === 'approved') {
+                reviewBadge = '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">Approved</span>';
+            } else if (pr.review_status === 'changes_requested') {
+                reviewBadge = '<span class="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Changes</span>';
+            } else if (pr.review_status === 'pending') {
+                reviewBadge = '<span class="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">Pending</span>';
+            } else {
+                reviewBadge = '<span class="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-300">None</span>';
+            }
+
+            let mergeableText = pr.mergeable_state || 'unknown';
+            if (mergeableText === 'clean') mergeableText = 'Ready';
+            else if (mergeableText === 'dirty') mergeableText = 'Conflicts';
+            else if (mergeableText === 'blocked') mergeableText = 'Blocked';
+            else if (mergeableText === 'unstable') mergeableText = 'Unstable';
+
+            const avatarUrl = pr.author_avatar &&
+                (pr.author_avatar.startsWith('https://avatars.githubusercontent.com/') || pr.author_avatar.startsWith('https://github.com/'))
+                ? pr.author_avatar
+                : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32"%3E%3Crect width="32" height="32" fill="%23E2E8F0"/%3E%3C/svg%3E';
+
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-slate-50 dark:hover:bg-slate-900/50';
+            row.id = `pr-row-${pr.id}`;
+            row.innerHTML = `
+                <td class="px-2 py-3">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(pr.author_login)}" class="h-6 w-6 rounded-full border border-slate-200 dark:border-slate-600 flex-shrink-0" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22%3E%3Crect width=%2224%22 height=%2224%22 fill=%22%23E2E8F0%22/%3E%3C/svg%3E'">
+                        <a href="${escapeHtml(pr.pr_url)}" target="_blank" rel="noopener noreferrer" class="font-medium text-slate-900 hover:text-[#BC0000] dark:text-slate-100 dark:hover:text-red-400 truncate text-xs" title="${escapeHtml(pr.title)}">${escapeHtml(pr.title)}</a>
+                    </div>
+                </td>
+                <td class="px-2 py-3 text-slate-600 dark:text-slate-400">
+                    <div class="truncate text-xs">${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}</div>
+                    <div class="text-xs text-slate-500 dark:text-slate-500">#${pr.pr_number}</div>
+                </td>
+                <td class="px-2 py-3 text-slate-600 dark:text-slate-400 text-xs truncate">${escapeHtml(pr.author_login)}</td>
+                <td class="px-2 py-3">${reviewBadge}</td>
+                <td class="px-2 py-3 text-slate-700 dark:text-slate-300 text-xs truncate">${escapeHtml(mergeableText)}</td>
+                <td class="px-2 py-3 text-center text-slate-700 dark:text-slate-300 text-xs">${pr.files_changed}</td>
+                <td class="px-2 py-3">
+                    <div class="flex flex-wrap gap-1 text-xs">
+                        <span class="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">
+                            <i class="fas fa-check-circle"></i>${pr.checks_passed}
+                        </span>
+                        ${pr.checks_failed > 0 ? `<a href="https://github.com/${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}/pull/${escapeHtml(String(pr.pr_number))}/checks" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-red-700 hover:border-red-300 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+                            <i class="fas fa-times-circle"></i>${escapeHtml(String(pr.checks_failed))}
+                        </a>` : `<span class="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+                            <i class="fas fa-times-circle"></i>${pr.checks_failed}
+                        </span>`}
+                        ${pr.checks_skipped > 0 ? `<span class="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-400">
+                            <i class="fas fa-minus-circle"></i>${pr.checks_skipped}
+                        </span>` : ''}
+                    </div>
+                </td>
+                <td class="px-2 py-3 text-center" id="readiness-overall-${pr.id}">
+                    <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                </td>
+                <td class="px-2 py-3 text-center" id="readiness-ci-${pr.id}">
+                    <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                </td>
+                <td class="px-2 py-3 text-center" id="readiness-review-${pr.id}">
+                    <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                </td>
+                <td class="px-2 py-3 text-center" id="readiness-response-${pr.id}">
+                    <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                </td>
+                <td class="px-2 py-3 text-center" id="readiness-feedback-${pr.id}">
+                    <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                </td>
+                <td class="px-2 py-3" id="readiness-issues-${pr.id}">
+                    <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                </td>
+                <td class="px-2 py-3 text-xs text-slate-600 dark:text-slate-400 truncate">${escapeHtml(timeAgo(pr.last_updated_at))}</td>
+                <td class="px-2 py-3 text-center">
+                    <button class="update-btn rounded-md border border-[#E10000] bg-white px-3 py-2 text-xs font-semibold text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30" data-pr-id="${pr.id}" title="Update PR data and analyze readiness">
+                        <i class="fas fa-sync mr-1"></i>Update
+                    </button>
+                </td>
+            `;
+            return row;
+        }
+
+        function updateSinglePrRow(prId, prData) {
+            // Find and update the PR in allPrs array
+            const prIndex = allPrs.findIndex(pr => pr.id === prId);
+            if (prIndex !== -1) {
+                // Preserve the id from the existing PR
+                allPrs[prIndex] = { ...prData, id: prId };
+            }
+
+            // Get the existing row
+            const existingRow = document.getElementById(`pr-row-${prId}`);
+            if (!existingRow) return;
+
+            // Create new row with updated data
+            const newRow = createPrRow({ ...prData, id: prId });
+            
+            // Replace the old row with the new one
+            existingRow.replaceWith(newRow);
+
+            // Re-attach the click event listener to the new button
+            const updateBtn = newRow.querySelector('.update-btn');
+            if (updateBtn) {
+                updateBtn.addEventListener('click', async (e) => {
+                    await updatePr(prId, e.currentTarget);
+                });
+            }
+        }
+
+        async function updatePr(prId, button) {
             const originalHtml = button.innerHTML;
             
             button.disabled = true;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Analyzing...';
+            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Updating...';
             button.classList.add('opacity-70', 'cursor-not-allowed');
 
             try {
-                const response = await fetch(`/api/prs/${prId}/readiness`);
-                const data = await response.json();
-                
-                if (data.error) {
-                    showError(data.error);
+                // Step 1: Refresh PR data from GitHub
+                const refreshResponse = await fetch('/api/refresh', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ pr_id: prId })
+                });
+
+                const refreshData = await refreshResponse.json();
+                if (refreshData.error) {
+                    showError(refreshData.error);
                     button.innerHTML = originalHtml;
                     button.disabled = false;
                     button.classList.remove('opacity-70', 'cursor-not-allowed');
                     return;
                 }
 
-                const readiness = data.readiness;
-                const reviewHealth = data.review_health;
+                // Clear cached readiness data for this PR since it's being refreshed
+                clearReadinessData(prId);
+                
+                // Check if PR was removed due to being merged/closed
+                if (refreshData.removed) {
+                    showError(refreshData.message || 'PR has been removed from tracking');
+                    await loadRepos();
+                    await loadPrs();
+                    await loadRateLimit();
+                    return;
+                }
+
+                // Update only this PR row with fresh data
+                updateSinglePrRow(prId, refreshData.data);
+                await loadRateLimit();
+
+                // Get the new button reference after row update
+                const updatedRow = document.getElementById(`pr-row-${prId}`);
+                const updatedButton = updatedRow ? updatedRow.querySelector('.update-btn') : null;
+                if (!updatedButton) {
+                    console.error('Could not find updated button');
+                    return;
+                }
+
+                // Step 2: Analyze readiness
+                const readinessResponse = await fetch(`/api/prs/${prId}/readiness`);
+                const readinessData = await readinessResponse.json();
+                
+                if (readinessData.error) {
+                    showError(readinessData.error);
+                    updatedButton.innerHTML = originalHtml;
+                    updatedButton.disabled = false;
+                    updatedButton.classList.remove('opacity-70', 'cursor-not-allowed');
+                    return;
+                }
+
+                const readiness = readinessData.readiness;
+                const reviewHealth = readinessData.review_health;
 
                 // Save readiness data to localStorage
                 saveReadinessData(prId, readiness, reviewHealth);
@@ -640,15 +741,20 @@
                 // Update all inline cells with readiness data
                 updateInlineCells(prId, readiness, reviewHealth);
                 
-                button.innerHTML = '<i class="fas fa-check mr-1"></i>Analyzed';
-                button.disabled = false;
-                button.classList.remove('opacity-70', 'cursor-not-allowed');
+                updatedButton.innerHTML = '<i class="fas fa-check mr-1"></i>Updated';
+                updatedButton.disabled = false;
+                updatedButton.classList.remove('opacity-70', 'cursor-not-allowed');
             } catch (error) {
-                console.error('Error checking readiness:', error);
-                showError('Failed to check PR readiness');
-                button.innerHTML = originalHtml;
-                button.disabled = false;
-                button.classList.remove('opacity-70', 'cursor-not-allowed');
+                console.error('Error updating PR:', error);
+                showError('Failed to update PR');
+                // Try to get the current button (might be the original or updated one)
+                const currentRow = document.getElementById(`pr-row-${prId}`);
+                const currentButton = currentRow ? currentRow.querySelector('.update-btn') : button;
+                if (currentButton) {
+                    currentButton.innerHTML = originalHtml;
+                    currentButton.disabled = false;
+                    currentButton.classList.remove('opacity-70', 'cursor-not-allowed');
+                }
             }
         }
 
@@ -800,51 +906,6 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Add PR';
-            }
-        }
-
-        async function refreshPr(prId, link) {
-            if (!link) return;
-
-            const originalText = link.textContent;
-            link.disabled = true;
-            link.classList.add('opacity-50', 'pointer-events-none');
-            link.textContent = '↻ Refreshing...';
-
-            try {
-                const response = await fetch('/api/refresh', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ pr_id: prId })
-                });
-
-                const data = await response.json();
-                if (data.error) {
-                    showError(data.error);
-                    link.textContent = originalText;
-                    link.disabled = false;
-                    link.classList.remove('opacity-50', 'pointer-events-none');
-                } else {
-                    // Clear cached readiness data for this PR since it's being refreshed
-                    clearReadinessData(prId);
-                    
-                    // Check if PR was removed due to being merged/closed
-                    if (data.removed) {
-                        showError(data.message || 'PR has been removed from tracking');
-                        // Reload repos to update counts and potentially remove empty repos
-                        await loadRepos();
-                    }
-                    await loadPrs();
-                    await loadRateLimit();
-                }
-            } catch (error) {
-                console.error('Error refreshing PR:', error);
-                showError('Failed to refresh PR');
-                link.textContent = originalText;
-                link.disabled = false;
-                link.classList.remove('opacity-50', 'pointer-events-none');
             }
         }
 
