@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PR Readiness Checker - BLT-Leaf</title>
+    <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -25,31 +27,43 @@
 
 <body class="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
     <header class="sticky top-0 z-30 border-b border-slate-200 bg-white px-5 dark:border-slate-700 dark:bg-slate-800">
-        <div class="flex justify-between item-center">
-            <div class="mx-auto flex w-full flex-col gap-3 px-4 py-3 sm:px-6">
-                <div class="flex items-center gap-2.5">
-                    <img width="30" src="./static/logo.png" alt="BLT-LEAF logo" onerror="this.style.display='none'" />
-                    <h1 class="font-semibold dark:text-white">BLT-LEAF</h1>
-                </div>
+        <div class="mx-auto flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
+            
+            <div class="flex items-center gap-4 lg:gap-6">
+                <a href="/" class="flex shrink-0 items-center gap-2 hover:opacity-80 transition-opacity">
+                    <img width="28" src="./static/logo.png" alt="Logo" onerror="this.style.display='none'" />
+                    <h1 class="hidden font-bold text-slate-900 dark:text-white sm:block">BLT-LEAF</h1>
+                </a>
 
-                <div class="flex flex-wrap items-center gap-3">
-                    <div class="text-xs font-medium text-slate-500 dark:text-slate-400" id="rateLimitLabel">GitHub API Rate Limit:</div>
-                    <div class="rate-limit-bar h-2 w-full max-w-xs overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar"
-                        aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="rateLimitLabel"
-                        aria-describedby="rateLimitText">
+                <div class="hidden items-center gap-2 sm:flex pl-4 border-l border-slate-200 dark:border-slate-700 h-8">
+                    <span class="text-[10px] font-medium text-slate-500 dark:text-slate-400">API Limit:</span>
+                    <div class="rate-limit-bar h-1.5 w-20 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
                         <div class="h-full w-0 rounded-full bg-[#E10000] transition-all duration-300" id="rateLimitFill"></div>
                     </div>
-                    <div class="text-xs font-semibold text-slate-700 dark:text-slate-300" id="rateLimitText" aria-live="polite" aria-atomic="true">Loading...</div>
+                    <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400" id="rateLimitText">N/A</span>
                 </div>
             </div>
-          <div class="flex items-center space-x-3">
-            <button id="themeToggle" class="rounded-lg p-2.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700" aria-label="Toggle theme">
-              <i class="fas fa-moon" id="themeIcon"></i>
-            </button>
-            <a class="flex gap-1 items-center bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-5 rounded-lg" href="https://github.com/OWASP-BLT/BLT-Leaf" target="_blank" rel="noopener noreferrer">
-              <i class="fab fa-github mr-2"></i> Contribute
-            </a>
-          </div>
+
+            <div class="flex flex-1 items-center justify-center px-4 md:px-8 lg:px-12">
+                <div class="relative w-full max-w-lg">
+                    <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                        <i class="fas fa-search text-slate-400"></i>
+                    </div>
+                    <input type="text" id="prSearchInput"
+                        class="block w-full rounded-md border border-[#e74c3c] bg-slate-50 py-2 pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-500 dark:border-[#e74c3c] dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-red-500 transition-colors shadow-sm"
+                        placeholder="Search PRs..." autocomplete="off">
+                </div>
+            </div>
+
+            <div class="flex shrink-0 items-center gap-3">
+                <button id="themeToggle" class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:text-slate-400 dark:hover:bg-slate-700 dark:focus:ring-slate-600">
+                    <i class="fas fa-moon" id="themeIcon"></i>
+                </button>
+                <a href="https://github.com/OWASP-BLT/BLT-Leaf" target="_blank" rel="noopener noreferrer"
+                   class="hidden rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 md:inline-flex items-center gap-2 transition-colors shadow-sm">
+                    <i class="fab fa-github"></i> <span>Contribute</span>
+                </a>
+            </div>
         </div>
     </header>
 
@@ -79,12 +93,22 @@
                 <div class="flex w-full max-w-4xl flex-col gap-2 sm:flex-row">
                     <input type="text" id="prUrlInput"
                         class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-2 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-red-900/50"
-                        placeholder="Enter GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)" autocomplete="off" />
+                        placeholder="Enter GitHub PR URL or Repository URL"
+                        autocomplete="off" />
                     <button id="addPrBtn"
                         class="btn-fallback w-[6rem] rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-[#BC0000] disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-200 disabled:text-red-700 dark:disabled:border-red-800 dark:disabled:bg-red-950 dark:disabled:text-red-400">
                         Add PR
                     </button>
                 </div>
+                
+                <div class="mt-2 flex items-center gap-2">
+                    <input type="checkbox" id="addAllPrsCheckbox"
+                        class="h-4 w-4 rounded border-slate-300 text-[#E10000] focus:ring-[#E10000] dark:border-slate-600 dark:bg-slate-700">
+                    <label for="addAllPrsCheckbox"
+                        class="text-sm text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                        Add all active PRs from this repo
+                    </label>
+                </div>                
                 <div id="errorMessage" class="fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))]"></div>
             </section>
 
@@ -98,9 +122,46 @@
     </div>
 
     <script>
-        let currentRepo = 'all';
+        let currentRepo = localStorage.getItem('currentRepo') || 'all';
         let allPrs = [];
         let repos = [];
+        let sortColumn = 'last_updated_at';
+        let sortDirection = 'desc';
+
+        // Helper functions for readiness data persistence
+        function saveReadinessData(prId, readiness, reviewHealth) {
+            try {
+                const data = JSON.parse(localStorage.getItem('prReadinessData') || '{}');
+                data[prId] = {
+                    readiness,
+                    reviewHealth,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem('prReadinessData', JSON.stringify(data));
+            } catch (error) {
+                console.error('Error saving readiness data:', error);
+            }
+        }
+
+        function loadReadinessData(prId) {
+            try {
+                const data = JSON.parse(localStorage.getItem('prReadinessData') || '{}');
+                return data[prId] || null;
+            } catch (error) {
+                console.error('Error loading readiness data:', error);
+                return null;
+            }
+        }
+
+        function clearReadinessData(prId) {
+            try {
+                const data = JSON.parse(localStorage.getItem('prReadinessData') || '{}');
+                delete data[prId];
+                localStorage.setItem('prReadinessData', JSON.stringify(data));
+            } catch (error) {
+                console.error('Error clearing readiness data:', error);
+            }
+        }
 
         const repoItemBaseClasses = ['repo-item', 'cursor-pointer', 'rounded-lg', 'border', 'px-3', 'py-2', 'transition-colors'];
         const repoItemIdleClasses = ['border-slate-200', 'bg-white', 'hover:border-slate-300', 'hover:bg-slate-50', 'dark:border-slate-700', 'dark:bg-slate-800', 'dark:hover:border-slate-600', 'dark:hover:bg-slate-700'];
@@ -126,43 +187,46 @@
         async function loadRateLimit() {
             try {
                 const response = await fetch('/api/rate-limit');
+                const textEl = document.getElementById('rateLimitText');
+                const fillEl = document.getElementById('rateLimitFill');
+
                 if (!response.ok) {
-                    document.getElementById('rateLimitText').textContent = 'N/A';
+                    if(textEl) textEl.textContent = 'N/A';
                     return;
                 }
 
                 const data = await response.json();
                 if (data.error) {
-                    document.getElementById('rateLimitText').textContent = 'N/A';
+                    if(textEl) textEl.textContent = 'N/A';
                     return;
                 }
 
                 const { limit, remaining } = data;
                 if (typeof limit !== 'number' || typeof remaining !== 'number') {
-                    document.getElementById('rateLimitText').textContent = 'N/A';
+                    if(textEl) textEl.textContent = 'N/A';
                     return;
                 }
 
                 const percentageRemaining = (remaining / limit) * 100;
-                const fillElement = document.getElementById('rateLimitFill');
-                fillElement.style.width = `${percentageRemaining}%`;
-
-                const barElement = document.querySelector('.rate-limit-bar');
-                barElement.setAttribute('aria-valuenow', Math.round(percentageRemaining));
-
-                fillElement.className = 'h-full rounded-full transition-all duration-300';
-                if (percentageRemaining < 20) {
-                    fillElement.classList.add('bg-red-600');
-                } else if (percentageRemaining <= 50) {
-                    fillElement.classList.add('bg-amber-500');
-                } else {
-                    fillElement.classList.add('bg-[#E10000]');
+                
+                if (fillEl) {
+                    fillEl.style.width = `${percentageRemaining}%`;
+                    fillEl.className = 'h-full rounded-full transition-all duration-300';
+                    if (percentageRemaining < 20) {
+                        fillEl.classList.add('bg-red-600');
+                    } else if (percentageRemaining <= 50) {
+                        fillEl.classList.add('bg-amber-500');
+                    } else {
+                        fillEl.classList.add('bg-[#E10000]');
+                    }
                 }
+                
+                if(textEl) textEl.textContent = `${remaining} / ${limit}`;
 
-                document.getElementById('rateLimitText').textContent = `${remaining} / ${limit}`;
             } catch (error) {
                 console.error('Error loading rate limit:', error);
-                document.getElementById('rateLimitText').textContent = 'N/A';
+                const textEl = document.getElementById('rateLimitText');
+                if(textEl) textEl.textContent = 'N/A';
             }
         }
 
@@ -187,12 +251,47 @@
             return 'just now';
         }
 
+        function sortPrs(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'desc';
+            }
+            
+            // Columns that should use numeric sorting
+            const numericColumns = ['files_changed', 'checks_passed', 'checks_failed', 'checks_skipped', 'pr_number'];
+
+            allPrs.sort((a, b) => {
+                let aVal = a[column];
+                let bVal = b[column];
+                
+                // Handle numeric columns
+                if (numericColumns.includes(column)) {
+                    aVal = Number(aVal) || 0;
+                    bVal = Number(bVal) || 0;
+                }
+                // Handle string comparisons for all other columns 
+                else {
+                    aVal = String(aVal || '').toLowerCase();
+                    bVal = String(bVal || '').toLowerCase();
+                }
+                
+                if (sortDirection === 'asc') return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+                else return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+            });
+            
+            // Re-apply filter after sorting
+            const searchTerm = document.getElementById('prSearchInput').value;
+            filterPrs(searchTerm);
+        }
+
         function showError(message) {
             const errorDiv = document.getElementById('errorMessage');
             errorDiv.textContent = '';
 
             const toastElement = document.createElement('div');
-            toastElement.className = 'flex items-start gap-2 rounded-lg border border-red-200 border-l-4 border-l-red-600 bg-white px-3 py-2.5 text-sm text-red-900';
+            toastElement.className = 'flex items-start gap-2 rounded-lg border border-red-200 border-l-4 border-l-red-600 bg-white px-3 py-2.5 text-sm text-red-900 shadow-lg';
 
             const iconElement = document.createElement('span');
             iconElement.className = 'inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-red-100 text-xs font-bold text-red-700';
@@ -251,6 +350,7 @@
 
                 li.addEventListener('click', () => {
                     currentRepo = li.dataset.repo;
+                    localStorage.setItem('currentRepo', currentRepo);
                     document.querySelectorAll('.repo-item').forEach(item => {
                         setRepoItemActiveState(item, item.dataset.repo === currentRepo);
                     });
@@ -263,12 +363,15 @@
 
         async function loadPrs() {
             const container = document.getElementById('prListContainer');
-            container.innerHTML = `
-                <div class="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-                    <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-500 dark:border-slate-600 dark:border-t-slate-400"></span>
-                    Loading PRs...
-                </div>
-            `;
+            // Only show spinner if search is empty to avoid flickering while typing
+            if(document.getElementById('prSearchInput').value.trim() === '') {
+                container.innerHTML = `
+                    <div class="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                        <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-500 dark:border-slate-600 dark:border-t-slate-400"></span>
+                        Loading PRs...
+                    </div>
+                `;
+            }
 
             try {
                 const url = currentRepo === 'all' ? '/api/prs' : `/api/prs?repo=${encodeURIComponent(currentRepo)}`;
@@ -282,56 +385,152 @@
                 }
 
                 allPrs = data.prs;
-                renderPrList();
+                
+                // Apply search filter if exists
+                const searchTerm = document.getElementById('prSearchInput').value;
+                if(searchTerm) {
+                    filterPrs(searchTerm);
+                } else {
+                    renderPrList(allPrs);
+                }
             } catch (error) {
                 console.error('Error loading PRs:', error);
                 showError('Failed to load PRs');
                 container.innerHTML = '<div class="rounded-xl border border-slate-200 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-800"><h3 class="text-lg font-semibold text-slate-900 dark:text-slate-100">Error loading PRs</h3></div>';
             }
         }
+        
+        function filterPrs(searchTerm) {
+            const term = searchTerm.toLowerCase();
+            const filtered = allPrs.filter(pr =>
+                (pr.title && pr.title.toLowerCase().includes(term)) ||
+                (pr.author_login && pr.author_login.toLowerCase().includes(term)) ||
+                (pr.repo_name && pr.repo_name.toLowerCase().includes(term)) ||
+                String(pr.pr_number).includes(term)
+            );
+            renderPrList(filtered);
+        }
 
-        function renderPrList() {
+        function renderPrList(prsToRender) {
             const container = document.getElementById('prListContainer');
+            // Use the passed filtered list OR fallback to allPrs
+            const prs = prsToRender || allPrs;
 
-            if (allPrs.length === 0) {
+            if (prs.length === 0) {
+                const isFiltered = document.getElementById('prSearchInput').value.trim() !== '';
+                const emptyTitle = isFiltered ? "No PRs Match" : "No PRs Added Yet";
                 container.innerHTML = `
                     <div class="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center dark:border-slate-600 dark:bg-slate-800">
-                        <h3 class="text-xl font-semibold text-slate-900 dark:text-slate-100">No PRs Found</h3>
+                        <h3 class="text-xl font-semibold text-slate-900 dark:text-slate-100">${emptyTitle}</h3>
                         <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Add a GitHub PR URL above to start tracking</p>
                     </div>
                 `;
                 return;
             }
 
-            container.innerHTML = '<div class="grid gap-4" id="prList"></div>';
-            const prList = document.getElementById('prList');
+            const getSortIcon = (column) => {
+                if (sortColumn !== column) return '<i class="fas fa-sort text-slate-400 ml-1"></i>';
+                return sortDirection === 'asc' 
+                    ? '<i class="fas fa-sort-up text-[#BC0000] dark:text-red-400 ml-1"></i>'
+                    : '<i class="fas fa-sort-down text-[#BC0000] dark:text-red-400 ml-1"></i>';
+            };
 
+            container.innerHTML = `
+                <div class="rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800" style="overflow-x: auto;">
+                    <table class="w-full text-left text-sm" style="min-width: 1600px;">
+                        <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                            <tr>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('title')" style="min-width: 200px;" title="API: GET /repos/{owner}/{repo}/pulls/{pr_number} (title field)">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">PR Title</span> ${getSortIcon('title')}
+                                    </div>
+                                </th>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('repo_owner')" style="min-width: 140px;" title="Stored in database (extracted from PR URL when added)">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">Repository</span> ${getSortIcon('repo_owner')}
+                                    </div>
+                                </th>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('author_login')" style="min-width: 100px;" title="API: GET /repos/{owner}/{repo}/pulls/{pr_number} (user.login field)">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">Author</span> ${getSortIcon('author_login')}
+                                    </div>
+                                </th>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('review_status')" style="min-width: 90px;" title="API: GET /repos/{owner}/{repo}/pulls/{pr_number}/reviews (latest state per reviewer)">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">Review</span> ${getSortIcon('review_status')}
+                                    </div>
+                                </th>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('mergeable_state')" style="min-width: 90px;" title="API: GET /repos/{owner}/{repo}/pulls/{pr_number} (mergeable_state field)">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">Mergeable</span> ${getSortIcon('mergeable_state')}
+                                    </div>
+                                </th>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('files_changed')" style="min-width: 60px;" title="API: GET /repos/{owner}/{repo}/pulls/{pr_number}/files (count of files)">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">Files</span> ${getSortIcon('files_changed')}
+                                    </div>
+                                </th>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('checks_passed')" style="min-width: 90px;" title="API: GET /repos/{owner}/{repo}/commits/{sha}/check-runs (conclusion field)">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">Checks</span> ${getSortIcon('checks_passed')}
+                                    </div>
+                                </th>
+                                <th class="px-2 py-3 text-center" style="min-width: 70px;" title="Overall Readiness Score - Calculated: (CI Score * 45%) + (Review Score * 55%)">
+                                    <div class="truncate">Ready</div>
+                                </th>
+                                <th class="px-2 py-3 text-center" style="min-width: 50px;" title="CI Score - Calculated from check-runs API based on pass/fail/skip counts">
+                                    <div class="truncate">CI</div>
+                                </th>
+                                <th class="px-2 py-3 text-center" style="min-width: 60px;" title="Review Score - Calculated from timeline analysis (commits, reviews, comments)">
+                                    <div class="truncate">Review</div>
+                                </th>
+                                <th class="px-2 py-3 text-center" style="min-width: 70px;" title="Response Rate - Calculated from timeline analysis using GET /repos/{owner}/{repo}/pulls/{pr_number}/commits and GET /repos/{owner}/{repo}/issues/{pr_number}/comments">
+                                    <div class="truncate">Response</div>
+                                </th>
+                                <th class="px-2 py-3 text-center" style="min-width: 80px;" title="Feedback Responded/Total - Calculated from GET /repos/{owner}/{repo}/pulls/{pr_number}/comments (review comments on diff)">
+                                    <div class="truncate">Feedback</div>
+                                </th>
+                                <th class="px-2 py-3" style="min-width: 200px;" title="Blockers, Warnings, and Recommendations - Calculated from readiness analysis combining all API data">
+                                    <div class="truncate">Issues</div>
+                                </th>
+                                <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" onclick="sortPrs('last_updated_at')" style="min-width: 90px;" title="API: GET /repos/{owner}/{repo}/pulls/{pr_number} (updated_at field)">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="truncate">Updated</span> ${getSortIcon('last_updated_at')}
+                                    </div>
+                                </th>
+                                <th class="px-2 py-3 text-center" style="min-width: 100px;" title="UI actions: Refresh PR data, Check Readiness, Remove from tracking">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200 dark:divide-slate-700" id="prTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            const tbody = document.getElementById('prTableBody');
             allPrs.forEach(pr => {
-                const prCard = document.createElement('div');
-                prCard.className = 'rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800';
-
                 let stateBadge = '';
                 if (pr.is_merged) {
-                    stateBadge = '<span class="inline-flex rounded-full border border-[#f5b0b0] bg-[#fff1f1] px-2.5 py-1 text-xs font-semibold text-[#BC0000] dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Merged</span>';
+                    stateBadge = '<span class="inline-flex rounded-full border border-[#f5b0b0] bg-[#fff1f1] px-2 py-0.5 text-xs font-semibold text-[#BC0000] dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Merged</span>';
                 } else if (pr.state === 'open') {
-                    stateBadge = '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">Open</span>';
+                    stateBadge = '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">Open</span>';
                 } else {
-                    stateBadge = '<span class="inline-flex rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Closed</span>';
+                    stateBadge = '<span class="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Closed</span>';
                 }
 
                 let reviewBadge = '';
                 if (pr.review_status === 'approved') {
-                    reviewBadge = '<span class="ml-1 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">Approved</span>';
+                    reviewBadge = '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">Approved</span>';
                 } else if (pr.review_status === 'changes_requested') {
-                    reviewBadge = '<span class="ml-1 inline-flex rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Changes Requested</span>';
+                    reviewBadge = '<span class="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">Changes</span>';
                 } else if (pr.review_status === 'pending') {
-                    reviewBadge = '<span class="ml-1 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">Pending Review</span>';
+                    reviewBadge = '<span class="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">Pending</span>';
                 } else {
-                    reviewBadge = '<span class="ml-1 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-300">No Reviews</span>';
+                    reviewBadge = '<span class="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-300">None</span>';
                 }
 
                 let mergeableText = pr.mergeable_state || 'unknown';
-                if (mergeableText === 'clean') mergeableText = 'Ready to merge';
+                if (mergeableText === 'clean') mergeableText = 'Ready';
                 else if (mergeableText === 'dirty') mergeableText = 'Conflicts';
                 else if (mergeableText === 'blocked') mergeableText = 'Blocked';
                 else if (mergeableText === 'unstable') mergeableText = 'Unstable';
@@ -339,71 +538,250 @@
                 const avatarUrl = pr.author_avatar &&
                     (pr.author_avatar.startsWith('https://avatars.githubusercontent.com/') || pr.author_avatar.startsWith('https://github.com/'))
                     ? pr.author_avatar
-                    : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="40"%3E%3Crect width="40" height="40" fill="%23E2E8F0"/%3E%3C/svg%3E';
+                    : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32"%3E%3Crect width="32" height="32" fill="%23E2E8F0"/%3E%3C/svg%3E';
 
-                prCard.innerHTML = `
-                    <div class="mb-4 flex flex-wrap items-start gap-3 sm:flex-nowrap">
-                        <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(pr.author_login)}" class="h-10 w-10 rounded-full border border-slate-200 dark:border-slate-600" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 fill=%22%23E2E8F0%22/%3E%3C/svg%3E'">
-                        <div class="min-w-0 flex-1">
-                            <h3 class="truncate text-base font-semibold text-slate-900 dark:text-slate-100"><a href="${escapeHtml(pr.pr_url)}" target="_blank" rel="noopener noreferrer" class="hover:text-[#BC0000] dark:hover:text-red-400">${escapeHtml(pr.title)}</a></h3>
-                            <div class="mt-1 text-sm text-slate-500 dark:text-slate-400">${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)} #${pr.pr_number} by ${escapeHtml(pr.author_login)}</div>
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-slate-50 dark:hover:bg-slate-900/50';
+                row.id = `pr-row-${pr.id}`;
+                row.innerHTML = `
+                    <td class="px-2 py-3">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(pr.author_login)}" class="h-6 w-6 rounded-full border border-slate-200 dark:border-slate-600 flex-shrink-0" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22%3E%3Crect width=%2224%22 height=%2224%22 fill=%22%23E2E8F0%22/%3E%3C/svg%3E'">
+                            <a href="${escapeHtml(pr.pr_url)}" target="_blank" rel="noopener noreferrer" class="font-medium text-slate-900 hover:text-[#BC0000] dark:text-slate-100 dark:hover:text-red-400 truncate text-xs" title="${escapeHtml(pr.title)}">${escapeHtml(pr.title)}</a>
                         </div>
-                        <div class="shrink-0">${stateBadge}${reviewBadge}</div>
-                    </div>
-
-                    <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-600 dark:bg-slate-900/50">
-                            <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Merge Status</div>
-                            <div class="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-200">${escapeHtml(mergeableText)}</div>
+                    </td>
+                    <td class="px-2 py-3 text-slate-600 dark:text-slate-400">
+                        <div class="truncate text-xs">${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}</div>
+                        <div class="text-xs text-slate-500 dark:text-slate-500">#${pr.pr_number}</div>
+                    </td>
+                    <td class="px-2 py-3 text-slate-600 dark:text-slate-400 text-xs truncate">${escapeHtml(pr.author_login)}</td>
+                    <td class="px-2 py-3">${reviewBadge}</td>
+                    <td class="px-2 py-3 text-slate-700 dark:text-slate-300 text-xs truncate">${escapeHtml(mergeableText)}</td>
+                    <td class="px-2 py-3 text-center text-slate-700 dark:text-slate-300 text-xs">${pr.files_changed}</td>
+                    <td class="px-2 py-3">
+                        <div class="flex flex-wrap gap-1 text-xs">
+                            <span class="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">
+                                <i class="fas fa-check-circle"></i>${pr.checks_passed}
+                            </span>
+                            ${pr.checks_failed > 0 ? `<a href="https://github.com/${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}/pull/${escapeHtml(String(pr.pr_number))}/checks" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-red-700 hover:border-red-300 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+                                <i class="fas fa-times-circle"></i>${escapeHtml(String(pr.checks_failed))}
+                            </a>` : `<span class="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+                                <i class="fas fa-times-circle"></i>${pr.checks_failed}
+                            </span>`}
+                            ${pr.checks_skipped > 0 ? `<span class="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:border-slate-700 dark:bg-slate-700 dark:text-slate-400">
+                                <i class="fas fa-minus-circle"></i>${pr.checks_skipped}
+                            </span>` : ''}
                         </div>
-                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-600 dark:bg-slate-900/50">
-                            <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Files Changed</div>
-                            <div class="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-200">${pr.files_changed}</div>
+                    </td>
+                    <td class="px-2 py-3 text-center" id="readiness-overall-${pr.id}">
+                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                    </td>
+                    <td class="px-2 py-3 text-center" id="readiness-ci-${pr.id}">
+                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                    </td>
+                    <td class="px-2 py-3 text-center" id="readiness-review-${pr.id}">
+                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                    </td>
+                    <td class="px-2 py-3 text-center" id="readiness-response-${pr.id}">
+                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                    </td>
+                    <td class="px-2 py-3 text-center" id="readiness-feedback-${pr.id}">
+                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                    </td>
+                    <td class="px-2 py-3" id="readiness-issues-${pr.id}">
+                        <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                    </td>
+                    <td class="px-2 py-3 text-xs text-slate-600 dark:text-slate-400 truncate">${escapeHtml(timeAgo(pr.last_updated_at))}</td>
+                    <td class="px-2 py-3 text-center">
+                        <button class="readiness-btn rounded-md border border-[#E10000] bg-white px-3 py-2 text-xs font-semibold text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30" data-pr-id="${pr.id}" title="Analyze Readiness">
+                            <i class="fas fa-chart-line mr-1"></i>Analyze
+                        </button>
+                        <div class="mt-1">
+                            <button class="refresh-link text-xs text-slate-500 hover:text-[#E10000] dark:text-slate-400 dark:hover:text-red-400 underline decoration-dotted" data-pr-id="${pr.id}" title="Refresh PR data from GitHub">
+                                ↻ Refresh
+                            </button>
                         </div>
-                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-600 dark:bg-slate-900/50">
-                            <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Last Updated</div>
-                            <div class="mt-1 text-sm text-slate-600 dark:text-slate-300">${escapeHtml(timeAgo(pr.last_updated_at))}</div>
-                        </div>
-                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-600 dark:bg-slate-900/50">
-                            <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Checks</div>
-                            <div class="mt-2 flex flex-wrap gap-2 text-xs">
-                                <div class="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-white px-2 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-slate-800 dark:text-emerald-400">
-                                    <span class="h-2 w-2 rounded-full bg-emerald-600 dark:bg-emerald-500"></span>
-                                    <span>${pr.checks_passed} passed</span>
-                                </div>
-                                <div class="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-white px-2 py-1 text-red-700 dark:border-red-900 dark:bg-slate-800 dark:text-red-400">
-                                    <span class="h-2 w-2 rounded-full bg-red-600 dark:bg-red-500"></span>
-                                    <span>${pr.checks_failed > 0 ? `<a class="underline hover:text-[#BC0000] dark:hover:text-red-300" href="https://github.com/${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}/pull/${escapeHtml(String(pr.pr_number))}/checks" target="_blank" rel="noopener noreferrer">${escapeHtml(String(pr.checks_failed))} failed</a>` : `${pr.checks_failed} failed`}</span>
-                                </div>
-                                <div class="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-                                    <span class="h-2 w-2 rounded-full bg-slate-500 dark:bg-slate-400"></span>
-                                    <span>${pr.checks_skipped} skipped</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="mt-4 flex items-center justify-end gap-2">
-                        <button class="refresh-btn rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100" data-pr-id="${pr.id}">Refresh</button>
-                        ${pr.last_refreshed_at ? `<span class="text-xs text-slate-500 dark:text-slate-400">(refreshed ${escapeHtml(timeAgo(pr.last_refreshed_at))})</span>` : ''}
-                    </div>
+                    </td>
                 `;
+                tbody.appendChild(row);
 
-                prList.appendChild(prCard);
+                // Load and display stored readiness data if available
+                const storedData = loadReadinessData(pr.id);
+                if (storedData && storedData.readiness && storedData.reviewHealth) {
+                    updateInlineCells(pr.id, storedData.readiness, storedData.reviewHealth);
+                    // Update button to show it was analyzed
+                    const analyzeBtn = row.querySelector('.readiness-btn');
+                    if (analyzeBtn) {
+                        analyzeBtn.innerHTML = '<i class="fas fa-check mr-1"></i>Analyzed';
+                    }
+                }
             });
 
-            document.querySelectorAll('.refresh-btn').forEach(btn => {
+            document.querySelectorAll('.readiness-btn').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
-                    const prId = e.target.dataset.prId;
-                    await refreshPr(prId);
+                    const prId = e.currentTarget.dataset.prId;
+                    await checkReadiness(prId, e.currentTarget);
                 });
             });
+
+            document.querySelectorAll('.refresh-link').forEach(link => {
+                link.addEventListener('click', async (e) => {
+                    const prId = e.currentTarget.dataset.prId;
+                    await refreshPr(prId, e.currentTarget);
+                });
+            });
+        }
+
+        async function checkReadiness(prId, button) {
+            const originalHtml = button.innerHTML;
+            
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Analyzing...';
+            button.classList.add('opacity-70', 'cursor-not-allowed');
+
+            try {
+                const response = await fetch(`/api/prs/${prId}/readiness`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(data.error);
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('opacity-70', 'cursor-not-allowed');
+                    return;
+                }
+
+                const readiness = data.readiness;
+                const reviewHealth = data.review_health;
+
+                // Save readiness data to localStorage
+                saveReadinessData(prId, readiness, reviewHealth);
+
+                // Update all inline cells with readiness data
+                updateInlineCells(prId, readiness, reviewHealth);
+                
+                button.innerHTML = '<i class="fas fa-check mr-1"></i>Analyzed';
+                button.disabled = false;
+                button.classList.remove('opacity-70', 'cursor-not-allowed');
+            } catch (error) {
+                console.error('Error checking readiness:', error);
+                showError('Failed to check PR readiness');
+                button.innerHTML = originalHtml;
+                button.disabled = false;
+                button.classList.remove('opacity-70', 'cursor-not-allowed');
+            }
+        }
+
+        function updateInlineCells(prId, readiness, reviewHealth) {
+            // Score color classes helper
+            const getScoreColor = (score) => {
+                if (score >= 70) return 'text-emerald-700 dark:text-emerald-400';
+                if (score >= 60) return 'text-amber-600 dark:text-amber-400';
+                if (score >= 40) return 'text-orange-600 dark:text-orange-400';
+                return 'text-red-600 dark:text-red-400';
+            };
+
+            // Update Overall readiness
+            const overallCell = document.getElementById(`readiness-overall-${prId}`);
+            if (overallCell) {
+                const icon = readiness.merge_ready ? '✅' : '❌';
+                const scoreClass = getScoreColor(readiness.overall_score);
+                overallCell.innerHTML = `
+                    <div class="flex flex-col items-center">
+                        <span class="text-base">${icon}</span>
+                        <span class="${scoreClass} text-xs font-bold">${readiness.overall_score_display}</span>
+                    </div>
+                `;
+            }
+
+            // Update CI score
+            const ciCell = document.getElementById(`readiness-ci-${prId}`);
+            if (ciCell) {
+                const scoreClass = getScoreColor(readiness.ci_score);
+                ciCell.innerHTML = `<span class="${scoreClass} text-xs font-bold">${readiness.ci_score_display}</span>`;
+            }
+
+            // Update Review score
+            const reviewCell = document.getElementById(`readiness-review-${prId}`);
+            if (reviewCell) {
+                const scoreClass = getScoreColor(readiness.review_score);
+                reviewCell.innerHTML = `<span class="${scoreClass} text-xs font-bold">${readiness.review_score_display}</span>`;
+            }
+
+            // Update Response rate
+            const responseCell = document.getElementById(`readiness-response-${prId}`);
+            if (responseCell) {
+                const responseScore = parseFloat(reviewHealth.response_rate_display.replace('%', ''));
+                const scoreClass = getScoreColor(responseScore);
+                responseCell.innerHTML = `<span class="${scoreClass} text-xs font-bold">${reviewHealth.response_rate_display}</span>`;
+            }
+
+            // Update Feedback
+            const feedbackCell = document.getElementById(`readiness-feedback-${prId}`);
+            if (feedbackCell) {
+                const feedbackPercent = reviewHealth.total_feedback > 0 ? 
+                    (reviewHealth.responded_feedback / reviewHealth.total_feedback) * 100 : 100;
+                const scoreClass = getScoreColor(feedbackPercent);
+                feedbackCell.innerHTML = `<span class="${scoreClass} text-xs font-bold">${reviewHealth.responded_feedback}/${reviewHealth.total_feedback}</span>`;
+            }
+
+            // Update Issues/Blockers column
+            const issuesCell = document.getElementById(`readiness-issues-${prId}`);
+            if (issuesCell) {
+                let issuesHTML = '<div class="text-xs space-y-0.5">';
+                let hasIssues = false;
+
+                // Show blockers
+                if (readiness.blockers && readiness.blockers.length > 0) {
+                    hasIssues = true;
+                    issuesHTML += `<div class="flex items-start gap-1 text-red-700 dark:text-red-400">`;
+                    issuesHTML += `<span class="font-bold">🚫</span>`;
+                    issuesHTML += `<span class="truncate" title="${escapeHtml(readiness.blockers.join('; '))}">${escapeHtml(readiness.blockers[0])}</span>`;
+                    if (readiness.blockers.length > 1) {
+                        issuesHTML += `<span class="font-semibold">+${readiness.blockers.length - 1}</span>`;
+                    }
+                    issuesHTML += `</div>`;
+                }
+
+                // Show warnings
+                if (readiness.warnings && readiness.warnings.length > 0) {
+                    hasIssues = true;
+                    issuesHTML += `<div class="flex items-start gap-1 text-amber-700 dark:text-amber-400">`;
+                    issuesHTML += `<span class="font-bold">⚠️</span>`;
+                    issuesHTML += `<span class="truncate" title="${escapeHtml(readiness.warnings.join('; '))}">${escapeHtml(readiness.warnings[0])}</span>`;
+                    if (readiness.warnings.length > 1) {
+                        issuesHTML += `<span class="font-semibold">+${readiness.warnings.length - 1}</span>`;
+                    }
+                    issuesHTML += `</div>`;
+                }
+
+                // Show recommendations
+                if (readiness.recommendations && readiness.recommendations.length > 0) {
+                    hasIssues = true;
+                    issuesHTML += `<div class="flex items-start gap-1 text-blue-700 dark:text-blue-400">`;
+                    issuesHTML += `<span class="font-bold">💡</span>`;
+                    issuesHTML += `<span class="truncate" title="${escapeHtml(readiness.recommendations.join('; '))}">${escapeHtml(readiness.recommendations[0])}</span>`;
+                    if (readiness.recommendations.length > 1) {
+                        issuesHTML += `<span class="font-semibold">+${readiness.recommendations.length - 1}</span>`;
+                    }
+                    issuesHTML += `</div>`;
+                }
+
+                if (!hasIssues) {
+                    issuesHTML += '<span class="text-emerald-600 dark:text-emerald-400 font-semibold">✅ All Clear</span>';
+                }
+
+                issuesHTML += '</div>';
+                issuesCell.innerHTML = issuesHTML;
+            }
         }
 
         async function addPr() {
             const input = document.getElementById('prUrlInput');
             const btn = document.getElementById('addPrBtn');
+            const checkbox = document.getElementById('addAllPrsCheckbox');
             const prUrl = input.value.trim();
+            const addAll = checkbox.checked;
 
             if (!prUrl) {
                 showError('Please enter a PR URL');
@@ -411,15 +789,20 @@
             }
 
             btn.disabled = true;
-            btn.textContent = 'Adding...';
+            btn.textContent = addAll ? 'Importing...' : 'Adding...';
 
             try {
+                // If importing all, handle logic to send repo_url appropriately
+                // But preserving your existing logic structure:
                 const response = await fetch('/api/prs', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ pr_url: prUrl })
+                    body: JSON.stringify({ 
+                        pr_url: prUrl,
+                        add_all: addAll
+                    })
                 });
 
                 const data = await response.json();
@@ -440,25 +823,13 @@
             }
         }
 
-        async function refreshPr(prId) {
-            const buttons = document.querySelectorAll('.refresh-btn');
-            let btn = null;
-            for (const button of buttons) {
-                if (button.dataset.prId === String(prId)) {
-                    btn = button;
-                    break;
-                }
-            }
-            if (!btn) return;
+        async function refreshPr(prId, link) {
+            if (!link) return;
 
-            const originalText = btn.textContent;
-            btn.classList.add('pointer-events-none', 'opacity-70');
-            btn.textContent = '';
-
-            const spinner = document.createElement('span');
-            spinner.className = 'mr-1 inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600';
-            btn.appendChild(spinner);
-            btn.appendChild(document.createTextNode('Refreshing...'));
+            const originalText = link.textContent;
+            link.disabled = true;
+            link.classList.add('opacity-50', 'pointer-events-none');
+            link.textContent = '↻ Refreshing...';
 
             try {
                 const response = await fetch('/api/refresh', {
@@ -472,19 +843,35 @@
                 const data = await response.json();
                 if (data.error) {
                     showError(data.error);
-                    btn.textContent = originalText;
-                    btn.classList.remove('pointer-events-none', 'opacity-70');
+                    link.textContent = originalText;
+                    link.disabled = false;
+                    link.classList.remove('opacity-50', 'pointer-events-none');
                 } else {
+                    // Clear cached readiness data for this PR since it's being refreshed
+                    clearReadinessData(prId);
+                    
+                    // Check if PR was removed due to being merged/closed
+                    if (data.removed) {
+                        showError(data.message || 'PR has been removed from tracking');
+                        // Reload repos to update counts and potentially remove empty repos
+                        await loadRepos();
+                    }
                     await loadPrs();
                     await loadRateLimit();
                 }
             } catch (error) {
                 console.error('Error refreshing PR:', error);
                 showError('Failed to refresh PR');
-                btn.textContent = originalText;
-                btn.classList.remove('pointer-events-none', 'opacity-70');
+                link.textContent = originalText;
+                link.disabled = false;
+                link.classList.remove('opacity-50', 'pointer-events-none');
             }
         }
+
+        // Search listener
+        document.getElementById('prSearchInput').addEventListener('input', (e) => {
+            filterPrs(e.target.value);
+        });
 
         document.getElementById('addPrBtn').addEventListener('click', addPr);
         document.getElementById('prUrlInput').addEventListener('keypress', (e) => {
@@ -493,6 +880,7 @@
 
         document.querySelector('[data-repo="all"]').addEventListener('click', () => {
             currentRepo = 'all';
+            localStorage.setItem('currentRepo', currentRepo);
             document.querySelectorAll('.repo-item').forEach(item => {
                 setRepoItemActiveState(item, item.dataset.repo === currentRepo);
             });
@@ -531,6 +919,9 @@
 
         document.getElementById('themeToggle').addEventListener('click', toggleTheme);
 
+        // Make sortPrs globally accessible for onclick handlers
+        window.sortPrs = sortPrs;
+
         initTheme();
         loadRateLimit();
         loadRepos();
@@ -538,5 +929,4 @@
         setInterval(loadRateLimit, 600000);
     </script>
 </body>
-
 </html>
