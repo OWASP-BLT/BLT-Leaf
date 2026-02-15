@@ -1,13 +1,54 @@
 # Authentication and Refresh Tracking
 
-This document describes the GitHub authentication requirement for refreshing PRs and the refresh tracking feature.
+This document describes the GitHub authentication requirement for refreshing PRs and the comprehensive history tracking feature.
 
 ## Overview
 
-PR refresh functionality now requires users to authenticate with their GitHub username. Each refresh is tracked in the database, recording:
+PR refresh functionality now requires users to authenticate with their GitHub username. All PR activity is tracked in a comprehensive history system, recording:
 - Who refreshed the PR
 - When it was refreshed
-- Total refresh count
+- All state changes (merged status, review status, checks)
+- Total activity count
+
+## New Feature: Activity Timeline
+
+Each PR now has an expandable timeline view that shows all activity and changes:
+- Click the **"History"** button on any PR card to expand/collapse the timeline
+- View a compact, scrollable list of all actions
+- See who performed each action and when
+- Track automatic state changes detected during refreshes
+
+### Timeline Action Types
+
+The timeline displays different types of events with distinct icons:
+- 🔄 **Refresh**: User-initiated PR data refresh
+- ➕ **Added**: PR was added to the tracker
+- 📝 **State Change**: PR state changed (open/closed/merged)
+- 👁 **Review Change**: Review status changed (approved, changes requested, etc.)
+- ✓ **Checks Change**: CI/CD check status changed
+
+### Timeline Display
+
+```
+▾ History                                     [Refresh] (last refreshed 5 min ago)
+──────────────────────────────────────────────────────────────────────────────
+ACTIVITY TIMELINE
+
+🔄  PR refreshed by alice
+    by alice · 5 minutes ago
+
+📝  Review status changed to approved
+    1 hour ago
+
+✓  Checks: 5 passed, 0 failed, 0 skipped
+    2 hours ago
+
+🔄  PR refreshed by bob
+    by bob · 3 hours ago
+
+➕  PR #42 added to tracker
+    2 days ago
+```
 
 ## How It Works
 
@@ -87,7 +128,8 @@ Authorization: Bearer {github_username}
   "success": true,
   "data": { /* PR data */ },
   "refresh_count": 5,
-  "refreshed_by": "username"
+  "refreshed_by": "username",
+  "changes_detected": 2
 }
 ```
 
@@ -98,25 +140,45 @@ Authorization: Bearer {github_username}
 }
 ```
 
-### GET /api/refresh-history/{pr_id}
-Get refresh history for a specific PR.
+### GET /api/pr-history/{pr_id}
+Get full activity history for a specific PR (replaces `/api/refresh-history`).
 
 **Response**:
 ```json
 {
   "refresh_count": 5,
+  "unique_users": 3,
   "history": [
     {
-      "refreshed_by": "user1",
-      "refreshed_at": "2024-01-15T10:30:00Z"
+      "action_type": "refresh",
+      "actor": "alice",
+      "description": "PR refreshed by alice",
+      "before_state": null,
+      "after_state": null,
+      "created_at": "2024-01-15T10:30:00Z"
     },
     {
-      "refreshed_by": "user2",
-      "refreshed_at": "2024-01-14T15:45:00Z"
+      "action_type": "state_change",
+      "actor": null,
+      "description": "State changed from open to closed",
+      "before_state": "{\"state\": \"open\"}",
+      "after_state": "{\"state\": \"closed\"}",
+      "created_at": "2024-01-15T09:00:00Z"
+    },
+    {
+      "action_type": "added",
+      "actor": null,
+      "description": "PR #42 added to tracker",
+      "before_state": null,
+      "after_state": null,
+      "created_at": "2024-01-14T15:45:00Z"
     }
   ]
 }
 ```
+
+### GET /api/refresh-history/{pr_id} (Legacy)
+Still supported for backward compatibility. Redirects to `/api/pr-history/{pr_id}`.
 
 ## UI Features
 
@@ -125,7 +187,12 @@ Get refresh history for a specific PR.
 3. **Refresh Count**: Each PR card displays:
    - "Never refreshed" if refresh_count is 0
    - "Refreshed X time(s) by Y users" otherwise
-4. **Success Notification**: Shows refresh count after successful refresh
+4. **History Timeline**: Expandable timeline showing all PR activity
+   - Click "History" button to expand/collapse
+   - Shows icons for different action types
+   - Displays actors and relative timestamps
+   - Scrollable for long histories
+5. **Success Notification**: Shows refresh count and changes detected after successful refresh
 
 ## Security Considerations
 
