@@ -39,8 +39,16 @@ BLT-Leaf/
 - 👥 **Multi-Repo Support**: Track PRs across multiple repositories
 - 🔄 **Real-time Updates**: Refresh PR data from GitHub API
 - 🎨 **Clean Interface**: Simple, GitHub-themed UI with dark mode support
+- 🔐 **GitHub OAuth Authentication**: Per-user authentication with secure token management
 
-### PR Readiness Analysis (NEW)
+### Authentication & Rate Limiting
+- 🔑 **OAuth Login**: Login with your GitHub account for personalized rate limits
+- 👤 **Per-User Tokens**: Each user's API requests use their own GitHub token
+- 📈 **Independent Rate Limits**: No more shared rate limit exhaustion
+- 🔒 **Secure Token Storage**: OAuth tokens encrypted at rest in database
+- 🚀 **Seamless Experience**: Automatic session management with localStorage
+
+### PR Readiness Analysis
 - 🎯 **Readiness Scoring**: Data-driven 0-100 score combining CI confidence and review health
 - 📈 **Timeline Tracking**: Complete chronological view of commits, reviews, and comments
 - 🔍 **Feedback Loop Detection**: Automatically tracks reviewer comments and author responses
@@ -103,6 +111,41 @@ cp .env.example .env
 wrangler d1 execute pr_tracker --file=./schema.sql
 ```
 
+7. **Set up GitHub OAuth (Required for per-user authentication):**
+
+   a. Create a GitHub OAuth App:
+   - Go to [GitHub Settings → Developer Settings → OAuth Apps](https://github.com/settings/developers)
+   - Click "New OAuth App"
+   - Fill in the details:
+     - **Application name**: BLT-Leaf (or your preferred name)
+     - **Homepage URL**: `https://your-worker.workers.dev` (or your custom domain)
+     - **Authorization callback URL**: `https://your-worker.workers.dev/api/auth/github/callback`
+   - Click "Register application"
+   - Note your **Client ID** and generate a new **Client Secret**
+
+   b. Configure OAuth secrets:
+   ```bash
+   # Set GitHub OAuth Client ID
+   wrangler secret put GITHUB_OAUTH_CLIENT_ID
+   # Paste your Client ID when prompted
+   
+   # Set GitHub OAuth Client Secret
+   wrangler secret put GITHUB_OAUTH_CLIENT_SECRET
+   # Paste your Client Secret when prompted
+   
+   # Set Session Secret (generate a random 32+ character string)
+   wrangler secret put SESSION_SECRET
+   # Paste a secure random string when prompted
+   # You can generate one with: openssl rand -base64 32
+   ```
+
+   c. For local development, create a `.dev.vars` file:
+   ```
+   GITHUB_OAUTH_CLIENT_ID=your_client_id_here
+   GITHUB_OAUTH_CLIENT_SECRET=your_client_secret_here
+   SESSION_SECRET=your_random_secret_here
+   ```
+
 ### Development
 
 Run the development server:
@@ -139,6 +182,23 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
 **Note**: Local development (`wrangler dev`) may not preserve worker state between requests. For accurate rate limiting and caching tests, deploy to production.
 
 ## Usage
+
+### Authentication
+1. **Login with GitHub OAuth**:
+   - Click the "Login with GitHub" button in the top-right corner
+   - You'll be redirected to GitHub to authorize the application
+   - After authorization, you'll be redirected back and automatically logged in
+   - Your session is saved in localStorage for convenience
+   
+2. **Benefits of Logging In**:
+   - **Higher Rate Limits**: Use your personal GitHub rate limit (5,000 requests/hour) instead of the shared unauthenticated limit (60 requests/hour)
+   - **Private Repository Access**: Access PRs from private repositories you have access to
+   - **No PAT Required**: No need to manually provide a Personal Access Token
+   
+3. **Unauthenticated Usage**:
+   - You can still use the app without logging in
+   - Requests will use GitHub's unauthenticated rate limit (60 requests/hour)
+   - Only public repositories are accessible
 
 ### Basic Tracking
 1. **Add a PR**: Enter a GitHub PR URL in the format `https://github.com/owner/repo/pull/number`
@@ -180,6 +240,17 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
 - **NO_ACTIVITY** (50): No reviews or feedback yet
 
 ## API Endpoints
+
+### Authentication Endpoints (NEW)
+- `GET /api/auth/github` - Initiate GitHub OAuth flow
+  - Returns redirect URL to GitHub authorization page
+- `GET /api/auth/github/callback` - OAuth callback handler
+  - Exchanges authorization code for access token
+  - Creates user session and returns session token
+- `GET /api/auth/me` - Get current user information
+  - Returns user profile if authenticated
+- `POST /api/auth/logout` - Logout and destroy session
+  - Requires `Authorization: Bearer <session_token>` header
 
 ### Core Endpoints
 - `GET /` - Serves the HTML interface
@@ -340,11 +411,35 @@ Context-aware suggestions based on PR state:
 - Split large PRs (>30 files)
 - Re-run flaky checks
 
-## GitHub API
+## GitHub API & Rate Limits
 
-The application uses the GitHub REST API to fetch PR information. No authentication is required for public repositories, but rate limits apply (60 requests per hour for unauthenticated requests).
+The application uses the GitHub REST API to fetch PR information.
 
-For private repositories or higher rate limits, you can add a GitHub token to the worker environment variables.
+### Rate Limits
+- **Unauthenticated**: 60 requests per hour (shared IP-based limit)
+- **Authenticated (OAuth)**: 5,000 requests per hour per user
+- **GitHub App** (future): Higher limits per installation
+
+### Authentication Methods
+
+1. **GitHub OAuth (Recommended)**
+   - Users login with their GitHub account
+   - Each user gets their own rate limit (5,000 req/hour)
+   - No shared rate limit exhaustion
+   - Access to private repositories
+   - Automatic token management
+
+2. **Unauthenticated (Fallback)**
+   - No login required
+   - Limited to public repositories
+   - Shared rate limit of 60 req/hour
+   - Suitable for light usage or public projects
+
+### Token Security
+- OAuth tokens are encrypted at rest using HMAC-SHA256
+- Session tokens are stored in localStorage on client
+- Server-side session validation on each request
+- Tokens can be revoked via logout or GitHub settings
 
 ## Contributing
 
