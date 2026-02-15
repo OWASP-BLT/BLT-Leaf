@@ -43,6 +43,154 @@ _timeline_cache = {
 # Cache TTL in seconds (30 minutes - timeline data changes less frequently)
 _TIMELINE_CACHE_TTL = 1800
 
+# Default encryption key (will show warning if used)
+_DEFAULT_ENCRYPTION_KEY = "DEFAULT_INSECURE_KEY_PLEASE_CONFIGURE_ENCRYPTION_KEY"
+
+def get_encryption_key(env):
+    """Get encryption key from environment or use default with warning"""
+    encryption_key = getattr(env, 'ENCRYPTION_KEY', None)
+    if not encryption_key:
+        print("WARNING: ENCRYPTION_KEY not configured, using default insecure key")
+        return _DEFAULT_ENCRYPTION_KEY
+    return encryption_key
+
+def encrypt_token(token, encryption_key):
+    """
+    Simple XOR-based encryption for GitHub tokens.
+    Note: For production, consider using proper encryption libraries.
+    
+    Args:
+        token: GitHub token to encrypt
+        encryption_key: Encryption key from environment
+        
+    Returns:
+        Base64-encoded encrypted token
+    """
+    import base64
+    
+    # Convert to bytes
+    token_bytes = token.encode('utf-8')
+    key_bytes = encryption_key.encode('utf-8')
+    
+    # XOR encryption
+    encrypted = bytearray()
+    for i, byte in enumerate(token_bytes):
+        key_byte = key_bytes[i % len(key_bytes)]
+        encrypted.append(byte ^ key_byte)
+    
+    # Base64 encode for safe transport
+    return base64.b64encode(bytes(encrypted)).decode('utf-8')
+
+def decrypt_token(encrypted_token, encryption_key):
+    """
+    Decrypt GitHub token using XOR-based encryption.
+    
+    Args:
+        encrypted_token: Base64-encoded encrypted token
+        encryption_key: Encryption key from environment
+        
+    Returns:
+        Decrypted GitHub token or None if decryption fails
+    """
+    import base64
+    
+    try:
+        # Decode from base64
+        encrypted_bytes = base64.b64decode(encrypted_token.encode('utf-8'))
+        key_bytes = encryption_key.encode('utf-8')
+        
+        # XOR decryption
+        decrypted = bytearray()
+        for i, byte in enumerate(encrypted_bytes):
+            key_byte = key_bytes[i % len(key_bytes)]
+            decrypted.append(byte ^ key_byte)
+        
+        return bytes(decrypted).decode('utf-8')
+    except Exception as e:
+        print(f"Token decryption failed: {str(e)}")
+        return None
+
+def extract_and_validate_token(request, env):
+    """
+    Extract and validate GitHub token from Authorization header.
+    
+    Supports two formats:
+    1. "Bearer <encrypted_token>" - New format with encrypted GitHub token
+    2. "<username>" - Legacy format (for backward compatibility)
+    
+    Args:
+        request: HTTP request object with headers
+        env: Environment object with ENCRYPTION_KEY
+        
+    Returns:
+        Tuple of (github_token, username) or (None, username) for legacy format
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return (None, None)
+    
+    auth_header = auth_header.strip()
+    
+    # Check for Bearer token (new format)
+    if auth_header.startswith('Bearer '):
+        encrypted_token = auth_header[7:]  # Remove "Bearer " prefix
+        encryption_key = get_encryption_key(env)
+        github_token = decrypt_token(encrypted_token, encryption_key)
+        
+        if not github_token:
+            return (None, None)
+        
+        # Extract username from token by calling GitHub API
+        # For now, we'll return the token and let the caller get the username
+        return (github_token, None)
+    
+    # Legacy format: just username
+    username = auth_header
+    
+    # Validate username format (GitHub username rules)
+    if not username or len(username) > 39:
+        return (None, None)
+    
+    # Check for valid GitHub username pattern
+    if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$', username):
+        return (None, None)
+    
+    return (None, username)
+
+async def get_github_username_from_token(token):
+    """
+    Get GitHub username from token by calling GitHub API.
+    
+    Args:
+        token: GitHub personal access token
+        
+    Returns:
+        Username string or None if API call fails
+    """
+    try:
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'BLT-Leaf/1.0'
+        }
+        
+        options = to_js({
+            "method": "GET",
+            "headers": headers
+        }, dict_converter=Object.fromEntries)
+        
+        response = await fetch('https://api.github.com/user', options)
+        
+        if response.status != 200:
+            return None
+        
+        user_data = (await response.json()).to_py()
+        return user_data.get('login')
+    except Exception as e:
+        print(f"Failed to get GitHub username: {str(e)}")
+        return None
+
 def extract_and_validate_username(request):
     """
     Extract and validate username from Authorization header.
