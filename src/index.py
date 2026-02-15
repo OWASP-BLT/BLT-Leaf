@@ -43,6 +43,15 @@ _timeline_cache = {
 # Cache TTL in seconds (30 minutes - timeline data changes less frequently)
 _TIMELINE_CACHE_TTL = 1800
 
+# In-memory cache for PR data (per worker isolate)
+# Reduces redundant GitHub API calls when fetching PR details
+_pr_data_cache = {
+    # Structure: {cache_key: {'data': dict, 'timestamp': float}}
+    # cache_key format: "pr:{owner}/{repo}/{pr_number}"
+}
+# Cache TTL in seconds (5 minutes - balance freshness vs API usage)
+_PR_CACHE_TTL = 300
+
 def parse_pr_url(pr_url):
     """
     Parse GitHub PR URL to extract owner, repo, and PR number.
@@ -415,6 +424,10 @@ async def delete_readiness_from_db(env, pr_id):
         print(f"Error clearing readiness from database for PR {pr_id}: {str(e)}")
         # Don't raise - cache invalidation is already done
 
+def get_pr_cache_key(owner, repo, pr_number):
+    """Generate cache key for PR data"""
+    return f"pr:{owner}/{repo}/{pr_number}"
+
 def get_timeline_cache_key(owner, repo, pr_number):
     """Generate cache key for timeline data"""
     return f"{owner}/{repo}/{pr_number}"
@@ -487,6 +500,22 @@ def invalidate_timeline_cache(owner, repo, pr_number):
     if cache_key in _timeline_cache:
         del _timeline_cache[cache_key]
         print(f"Timeline Cache: Invalidated for {cache_key}")
+
+def invalidate_pr_data_cache(owner, repo, pr_number):
+    """Invalidate cached PR data for a PR.
+    
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        pr_number: PR number
+    """
+    global _pr_data_cache
+    
+    cache_key = get_pr_cache_key(owner, repo, pr_number)
+    
+    if cache_key in _pr_data_cache:
+        del _pr_data_cache[cache_key]
+        print(f"PR Cache: Invalidated for {cache_key}")
 
 def parse_repo_url(url):
     """Parse GitHub Repo URL to extract owner and repo name"""
@@ -655,8 +684,33 @@ async def fetch_with_headers(url, headers=None, token=None):
     }, dict_converter=Object.fromEntries)
     return await fetch(url, options)
 
-async def fetch_pr_data(owner, repo, pr_number, token=None):
-    """Fetch PR data from GitHub API with parallel requests for optimal performance"""
+async def fetch_pr_data(owner, repo, pr_number, token=None, force_refresh=False):
+    """Fetch PR data from GitHub API with caching and parallel requests for optimal performance
+    
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        pr_number: PR number
+        token: Optional GitHub token for authentication
+        force_refresh: If True, bypass cache and fetch fresh data
+        
+    Returns:
+        Dictionary containing PR data, or None if fetch fails
+    """
+    global _pr_data_cache
+    
+    cache_key = get_pr_cache_key(owner, repo, pr_number)
+    current_time = Date.now() / 1000  # Current time in seconds
+    
+    # Check cache first (unless force refresh)
+    if not force_refresh and cache_key in _pr_data_cache:
+        cached = _pr_data_cache[cache_key]
+        if current_time - cached['timestamp'] < _PR_CACHE_TTL:
+            print(f"✅ PR Cache HIT for {cache_key}")
+            return cached['data']
+    
+    print(f"🔄 PR Cache MISS for {cache_key} - fetching from GitHub")
+    
     headers = {
         'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28'
@@ -734,7 +788,7 @@ async def fetch_pr_data(owner, repo, pr_number, token=None):
             elif 'APPROVED' in latest_reviews.values():
                 review_status = 'approved'
         
-        return {
+        result = {
             'title': pr_data.get('title', ''),
             'state': pr_data.get('state', ''),
             'is_merged': 1 if pr_data.get('merged', False) else 0,
@@ -748,6 +802,15 @@ async def fetch_pr_data(owner, repo, pr_number, token=None):
             'review_status': review_status,
             'last_updated_at': pr_data.get('updated_at', '')
         }
+        
+        # Cache the result before returning
+        _pr_data_cache[cache_key] = {
+            'data': result,
+            'timestamp': current_time
+        }
+        print(f"💾 PR Cache STORED for {cache_key}")
+        
+        return result
     except Exception as e:
         # Return more informative error for debugging
         error_msg = f"Error fetching PR data: {str(e)}"
@@ -1535,8 +1598,8 @@ async def handle_refresh_pr(request, env):
         # Convert JsProxy to Python dict to make it subscriptable
         result = result.to_py()
         
-        # Fetch fresh data from GitHub (with Token)
-        pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'], user_token)
+        # Fetch fresh data from GitHub (with Token) - force refresh to bypass cache
+        pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'], user_token, force_refresh=True)
         if not pr_data:
             return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
                               {'status': 403, 'headers': {'Content-Type': 'application/json'}})
@@ -1546,6 +1609,7 @@ async def handle_refresh_pr(request, env):
             # Invalidate caches since PR state changed
             await invalidate_readiness_cache(env, pr_id)
             invalidate_timeline_cache(result['repo_owner'], result['repo_name'], result['pr_number'])
+            invalidate_pr_data_cache(result['repo_owner'], result['repo_name'], result['pr_number'])
             
             # Delete the PR from database
             delete_stmt = db.prepare('DELETE FROM prs WHERE id = ?').bind(pr_id)
@@ -1560,10 +1624,11 @@ async def handle_refresh_pr(request, env):
         
         await upsert_pr(db, result['pr_url'], result['repo_owner'], result['repo_name'], result['pr_number'], pr_data)
         
-        # Invalidate caches after successful refresh
+        # Invalidate all caches after successful refresh
         # This ensures cached results don't become stale after new commits or review activity
         await invalidate_readiness_cache(env, pr_id)
         invalidate_timeline_cache(result['repo_owner'], result['repo_name'], result['pr_number'])
+        invalidate_pr_data_cache(result['repo_owner'], result['repo_name'], result['pr_number'])
         
         return Response.new(json.dumps({'success': True, 'data': pr_data}), 
                           {'headers': {'Content-Type': 'application/json'}})
