@@ -25,7 +25,7 @@ The timeline displays different types of events with distinct icons:
 - ➕ **Added**: PR was added to the tracker
 - 📝 **State Change**: PR state changed (open/closed/merged)
 - 👁 **Review Change**: Review status changed (approved, changes requested, etc.)
-- ✓ **Checks Change**: CI/CD check status changed
+- ⚙️ **Checks Change**: CI/CD check status changed
 
 ### Timeline Display
 

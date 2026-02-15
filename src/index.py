@@ -419,11 +419,12 @@ async def handle_add_pr(request, env):
         if id_result:
             pr_id = id_result.to_py()['id']
             # Record in history that this PR was added
+            # Note: Actor not available in add operation (no authentication required)
             await record_pr_history(
                 db, 
                 pr_id, 
                 'added', 
-                None,  # No specific actor for adding
+                None,
                 f"PR #{parsed['pr_number']} added to tracker"
             )
         
@@ -606,12 +607,14 @@ async def handle_refresh_pr(request, env):
         )
         
         # Record any detected changes
+        # Note: Changes are attributed to the refresh actor since they triggered the detection
+        # This provides better audit trail showing who discovered the changes
         for change in changes:
             await record_pr_history(
                 db,
                 pr_id,
                 change['type'],
-                None,  # Changes are system-detected, not user-initiated
+                github_username,  # Attribute change detection to the user who refreshed
                 change['description'],
                 change.get('before'),
                 change.get('after')

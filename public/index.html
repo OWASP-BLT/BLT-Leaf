@@ -590,7 +590,7 @@
                 item.className = 'flex gap-2 text-xs';
                 
                 // Icon based on action type
-                let icon = '●';
+                let icon = '●';  // Default fallback for unknown action types
                 let iconColor = 'text-slate-400';
                 if (entry.action_type === 'refresh') {
                     icon = '🔄';
@@ -601,7 +601,7 @@
                     icon = '👁';
                     iconColor = 'text-purple-500';
                 } else if (entry.action_type === 'checks_change') {
-                    icon = '✓';
+                    icon = '⚙️';  // Gear icon for CI/checks
                     iconColor = 'text-emerald-500';
                 } else if (entry.action_type === 'added') {
                     icon = '➕';
