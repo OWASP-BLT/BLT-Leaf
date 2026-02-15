@@ -1,0 +1,159 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+# Set minimal permissions for all jobs
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend Python Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Run Python unit tests
+        run: |
+          python3 -m unittest discover -s tests -p "test_*.py" -v
+      
+      - name: Check test results
+        if: failure()
+        run: echo "Backend tests failed!"
+
+  frontend-tests:
+    name: Frontend JavaScript Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Validate frontend test files
+        run: |
+          echo "Checking frontend test files..."
+          
+          # Check test HTML file exists
+          if [ ! -f tests/test_frontend.html ]; then
+            echo "Error: tests/test_frontend.html not found"
+            exit 1
+          fi
+          echo "✓ Frontend test HTML file exists"
+          
+          # Check test file contains test definitions
+          if grep -q "describe(" tests/test_frontend.html && \
+             grep -q "escapeHtml" tests/test_frontend.html && \
+             grep -q "timeAgo" tests/test_frontend.html; then
+            echo "✓ Frontend tests are defined (escapeHtml, timeAgo)"
+          else
+            echo "Error: Expected test functions not found"
+            exit 1
+          fi
+          
+          # Check test file is valid HTML
+          if grep -q "<!DOCTYPE html>" tests/test_frontend.html && \
+             grep -q "</html>" tests/test_frontend.html; then
+            echo "✓ Frontend test file is valid HTML"
+          else
+            echo "Error: Frontend test file is not valid HTML"
+            exit 1
+          fi
+          
+          echo ""
+          echo "All frontend test validations passed!"
+          echo "Note: To run tests interactively, open tests/test_frontend.html in a browser"
+      
+      - name: Check test results
+        if: failure()
+        run: echo "Frontend tests validation failed!"
+
+  validation:
+    name: Configuration Validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Validate wrangler.toml
+        run: |
+          if [ ! -f wrangler.toml ]; then
+            echo "Error: wrangler.toml not found"
+            exit 1
+          fi
+          echo "wrangler.toml exists"
+      
+      - name: Validate schema.sql
+        run: |
+          if [ ! -f schema.sql ]; then
+            echo "Error: schema.sql not found"
+            exit 1
+          fi
+          echo "schema.sql exists"
+          
+          # Basic SQL syntax check
+          if grep -q "CREATE TABLE" schema.sql; then
+            echo "schema.sql contains table definitions"
+          else
+            echo "Warning: schema.sql may not contain table definitions"
+          fi
+      
+      - name: Validate Python source
+        run: |
+          if [ ! -f src/index.py ]; then
+            echo "Error: src/index.py not found"
+            exit 1
+          fi
+          echo "src/index.py exists"
+          
+          # Check for Python syntax errors
+          python3 -m py_compile src/index.py || exit 1
+          echo "Python syntax is valid"
+      
+      - name: Validate HTML
+        run: |
+          if [ ! -f public/index.html ]; then
+            echo "Error: public/index.html not found"
+            exit 1
+          fi
+          echo "public/index.html exists"
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests, validation]
+    if: always()
+    permissions: {}
+    
+    steps:
+      - name: Check results
+        run: |
+          echo "Backend Tests: ${{ needs.backend-tests.result }}"
+          echo "Frontend Tests: ${{ needs.frontend-tests.result }}"
+          echo "Validation: ${{ needs.validation.result }}"
+          
+          if [ "${{ needs.backend-tests.result }}" != "success" ] || \
+             [ "${{ needs.frontend-tests.result }}" != "success" ] || \
+             [ "${{ needs.validation.result }}" != "success" ]; then
+            echo "Some tests failed!"
+            exit 1
+          fi
+          
+          echo "All tests passed!"
