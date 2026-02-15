@@ -56,6 +56,18 @@
             </div>
 
             <div class="flex shrink-0 items-center gap-3">
+                <!-- Auth UI -->
+                <div id="authContainer" class="flex items-center gap-2">
+                    <span id="usernameDisplay" class="hidden text-sm text-slate-600 dark:text-slate-400"></span>
+                    <button id="loginBtn" onclick="login()"
+                        class="rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700 transition-colors shadow-sm">
+                        <i class="fas fa-sign-in-alt mr-1"></i>Login
+                    </button>
+                    <button id="logoutBtn" onclick="logout()"
+                        class="hidden rounded-lg bg-slate-600 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition-colors shadow-sm">
+                        <i class="fas fa-sign-out-alt mr-1"></i>Logout
+                    </button>
+                </div>
                 <button id="themeToggle" class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:text-slate-400 dark:hover:bg-slate-700 dark:focus:ring-slate-600">
                     <i class="fas fa-moon" id="themeIcon"></i>
                 </button>
@@ -119,6 +131,18 @@
                 </div>
             </div>
         </main>
+
+        <!-- Timeline Panel (Right Side) -->
+        <aside id="timelinePanel" class="hidden lg:block lg:w-80 border-l border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 overflow-y-auto">
+            <div class="p-4">
+                <h2 class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Activity Timeline</h2>
+                <div id="timelineContent" class="space-y-3">
+                    <div class="text-center py-8 text-slate-400 dark:text-slate-500 text-sm">
+                        Hover over a PR to see its history
+                    </div>
+                </div>
+            </div>
+        </aside>
     </div>
 
     <script>
@@ -173,6 +197,162 @@
             } catch (error) {
                 console.error('Error clearing readiness data:', error);
             }
+        }
+
+        // Authentication functions
+        function getUsername() {
+            return localStorage.getItem('github_username');
+        }
+
+        function setUsername(username) {
+            localStorage.setItem('github_username', username);
+        }
+
+        function clearUsername() {
+            localStorage.removeItem('github_username');
+        }
+
+        function validateUsername(username) {
+            // GitHub username rules: 1-39 chars, alphanumeric + hyphens, no leading/trailing/consecutive hyphens
+            if (!username || username.length > 39) return false;
+            return /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/.test(username);
+        }
+
+        function updateAuthUI() {
+            const username = getUsername();
+            const authContainer = document.getElementById('authContainer');
+            const loginBtn = document.getElementById('loginBtn');
+            const logoutBtn = document.getElementById('logoutBtn');
+            const usernameDisplay = document.getElementById('usernameDisplay');
+
+            if (username) {
+                loginBtn.classList.add('hidden');
+                logoutBtn.classList.remove('hidden');
+                usernameDisplay.textContent = username;
+                usernameDisplay.classList.remove('hidden');
+            } else {
+                loginBtn.classList.remove('hidden');
+                logoutBtn.classList.add('hidden');
+                usernameDisplay.classList.add('hidden');
+            }
+        }
+
+        function login() {
+            const username = prompt('Enter your GitHub username:');
+            if (!username) return;
+
+            if (!validateUsername(username)) {
+                showError('Invalid GitHub username. Must be 1-39 characters, alphanumeric + hyphens only.');
+                return;
+            }
+
+            setUsername(username);
+            updateAuthUI();
+            showSuccess(`Logged in as ${username}`);
+        }
+
+        function logout() {
+            if (confirm('Are you sure you want to log out?')) {
+                clearUsername();
+                updateAuthUI();
+                showSuccess('Logged out successfully');
+            }
+        }
+
+        // Timeline functions
+        let currentTimelinePrId = null;
+
+        async function loadTimeline(prId) {
+            if (currentTimelinePrId === prId) return;  // Already showing this PR's timeline
+            
+            currentTimelinePrId = prId;
+            const timelineContent = document.getElementById('timelineContent');
+            
+            try {
+                const response = await fetch(`/api/pr-history/${prId}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    timelineContent.innerHTML = `<div class="text-center py-4 text-red-500 text-sm">${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+                
+                // Render timeline
+                let html = '';
+                
+                // Summary statistics
+                html += `
+                    <div class="bg-slate-50 dark:bg-slate-900 rounded-lg p-3 mb-4 border border-slate-200 dark:border-slate-700">
+                        <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Total Activity</div>
+                        <div class="text-2xl font-bold text-slate-900 dark:text-slate-100">${data.history.length} events</div>
+                        <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                            ${data.refresh_count} refreshes by ${data.unique_users} ${data.unique_users === 1 ? 'user' : 'users'}
+                        </div>
+                    </div>
+                `;
+                
+                // Timeline entries
+                if (data.history.length > 0) {
+                    html += '<div class="space-y-3">';
+                    data.history.forEach(entry => {
+                        const icon = getActionIcon(entry.action_type);
+                        const color = getActionColor(entry.action_type);
+                        const timeAgoText = entry.created_at ? timeAgo(entry.created_at) : 'Unknown time';
+                        
+                        html += `
+                            <div class="border-l-2 ${color} pl-3 pb-3">
+                                <div class="flex items-start gap-2">
+                                    <span class="text-lg">${icon}</span>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-sm font-medium text-slate-900 dark:text-slate-100">${escapeHtml(entry.description || 'Activity')}</div>
+                                        ${entry.actor ? `<div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">by ${escapeHtml(entry.actor)}</div>` : ''}
+                                        <div class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">${timeAgoText}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                } else {
+                    html += '<div class="text-center py-4 text-slate-400 dark:text-slate-500 text-sm">No activity recorded yet</div>';
+                }
+                
+                timelineContent.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading timeline:', error);
+                timelineContent.innerHTML = '<div class="text-center py-4 text-red-500 text-sm">Failed to load timeline</div>';
+            }
+        }
+
+        function clearTimeline() {
+            currentTimelinePrId = null;
+            document.getElementById('timelineContent').innerHTML = `
+                <div class="text-center py-8 text-slate-400 dark:text-slate-500 text-sm">
+                    Hover over a PR to see its history
+                </div>
+            `;
+        }
+
+        function getActionIcon(actionType) {
+            const icons = {
+                'refresh': '🔄',
+                'added': '➕',
+                'state_change': '📝',
+                'review_change': '👁',
+                'checks_change': '⚙️'
+            };
+            return icons[actionType] || '📌';
+        }
+
+        function getActionColor(actionType) {
+            const colors = {
+                'refresh': 'border-blue-400 dark:border-blue-600',
+                'added': 'border-green-400 dark:border-green-600',
+                'state_change': 'border-purple-400 dark:border-purple-600',
+                'review_change': 'border-yellow-400 dark:border-yellow-600',
+                'checks_change': 'border-orange-400 dark:border-orange-600'
+            };
+            return colors[actionType] || 'border-slate-400 dark:border-slate-600';
         }
 
         const repoItemBaseClasses = ['repo-item', 'cursor-pointer', 'rounded-lg', 'border', 'px-3', 'py-2', 'transition-colors'];
@@ -320,6 +500,30 @@
             setTimeout(() => {
                 errorDiv.textContent = '';
             }, 5000);
+        }
+
+        function showSuccess(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = '';
+
+            const toastElement = document.createElement('div');
+            toastElement.className = 'flex items-start gap-2 rounded-lg border border-green-200 border-l-4 border-l-green-600 bg-white px-3 py-2.5 text-sm text-green-900 shadow-lg';
+
+            const iconElement = document.createElement('span');
+            iconElement.className = 'inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-green-100 text-xs font-bold text-green-700';
+            iconElement.innerHTML = '<i class="fas fa-check"></i>';
+
+            const textElement = document.createElement('div');
+            textElement.className = 'leading-5';
+            textElement.textContent = message;
+
+            toastElement.appendChild(iconElement);
+            toastElement.appendChild(textElement);
+            errorDiv.appendChild(toastElement);
+
+            setTimeout(() => {
+                errorDiv.textContent = '';
+            }, 3000);
         }
 
         async function loadRepos() {
@@ -638,6 +842,11 @@
                 `;
                 tbody.appendChild(row);
 
+                // Add hover event for timeline
+                row.addEventListener('mouseenter', () => {
+                    loadTimeline(pr.id);
+                });
+
                 // Load and display stored readiness data if available
                 const storedData = loadReadinessData(pr.id);
                 if (storedData && storedData.readiness && storedData.reviewHealth) {
@@ -659,6 +868,13 @@
         }
 
         async function updatePr(prId, button) {
+            // Check authentication first
+            const username = getUsername();
+            if (!username) {
+                showError('Please log in to refresh PRs');
+                return;
+            }
+
             const originalHtml = button.innerHTML;
             
             button.disabled = true;
@@ -670,7 +886,8 @@
                 const refreshResponse = await fetch('/api/refresh', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'Authorization': username
                     },
                     body: JSON.stringify({ pr_id: prId })
                 });
@@ -939,6 +1156,7 @@
         window.sortPrs = sortPrs;
 
         initTheme();
+        updateAuthUI();  // Initialize authentication UI
         loadRateLimit();
         loadRepos();
         loadPrs();
