@@ -43,6 +43,64 @@ _timeline_cache = {
 # Cache TTL in seconds (30 minutes - timeline data changes less frequently)
 _TIMELINE_CACHE_TTL = 1800
 
+def verify_auth_token(request):
+    """
+    Verify authentication token from Authorization header.
+    
+    Extracts GitHub username from Authorization header.
+    Format: Authorization: <username>
+    
+    Security validation:
+    - Username must be 1-39 characters (GitHub's limit)
+    - Only alphanumeric characters and hyphens allowed
+    - Cannot start or end with hyphen
+    - Cannot have consecutive hyphens
+    
+    Args:
+        request: HTTP request object with headers
+        
+    Returns:
+        Username string if valid, None otherwise
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return None
+    
+    username = auth_header.strip()
+    
+    # Validate username format (GitHub username rules)
+    # 1-39 characters, alphanumeric + hyphens, no leading/trailing/consecutive hyphens
+    if not username or len(username) > 39:
+        return None
+    
+    # Check for valid GitHub username pattern
+    if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$', username):
+        return None
+    
+    return username
+
+async def record_pr_history(db, pr_id, action_type, actor=None, description=None, before_state=None, after_state=None):
+    """
+    Record an entry in PR history table.
+    
+    Args:
+        db: Database connection
+        pr_id: PR database ID
+        action_type: Type of action ('refresh', 'state_change', 'review_change', 'checks_change', 'added')
+        actor: Username who performed the action (optional)
+        description: Human-readable description (optional)
+        before_state: JSON string of state before change (optional)
+        after_state: JSON string of state after change (optional)
+    """
+    try:
+        stmt = db.prepare('''
+            INSERT INTO pr_history (pr_id, action_type, actor, description, before_state, after_state)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''').bind(pr_id, action_type, actor, description, before_state, after_state)
+        await stmt.run()
+    except Exception as e:
+        print(f"Error recording PR history: {str(e)}")
+
 def parse_pr_url(pr_url):
     """
     Parse GitHub PR URL to extract owner, repo, and PR number.
@@ -582,6 +640,22 @@ async def init_database_schema(env):
         ''')
         await create_table.run()
         
+        # Create pr_history table for tracking all PR activity
+        create_history_table = db.prepare('''
+            CREATE TABLE IF NOT EXISTS pr_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pr_id INTEGER NOT NULL,
+                action_type TEXT NOT NULL,
+                actor TEXT,
+                description TEXT,
+                before_state TEXT,
+                after_state TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (pr_id) REFERENCES prs(id) ON DELETE CASCADE
+            )
+        ''')
+        await create_history_table.run()
+        
         # Migration: Add columns if they don't exist
         # Check if columns exist by querying PRAGMA table_info
         try:
@@ -633,6 +707,16 @@ async def init_database_schema(env):
         
         index2 = db.prepare('CREATE INDEX IF NOT EXISTS idx_pr_number ON prs(pr_number)')
         await index2.run()
+        
+        # Create indexes for pr_history table
+        index3 = db.prepare('CREATE INDEX IF NOT EXISTS idx_pr_history_pr_id ON pr_history(pr_id)')
+        await index3.run()
+        
+        index4 = db.prepare('CREATE INDEX IF NOT EXISTS idx_pr_history_actor ON pr_history(actor)')
+        await index4.run()
+        
+        index5 = db.prepare('CREATE INDEX IF NOT EXISTS idx_pr_history_action_type ON pr_history(action_type)')
+        await index5.run()
         
     except Exception as e:
         # Log the error but don't crash - schema may already exist
@@ -1288,8 +1372,17 @@ def calculate_pr_readiness(pr_data, review_classification, review_score):
     }
 
 async def upsert_pr(db, pr_url, owner, repo, pr_number, pr_data):
-    """Helper to insert or update PR in database (Deduplicates logic)"""
+    """Helper to insert or update PR in database (Deduplicates logic)
+    
+    Returns:
+        Tuple of (pr_id, was_new) where was_new is True if PR was newly inserted
+    """
     current_timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    
+    # Check if PR already exists
+    check_stmt = db.prepare('SELECT id FROM prs WHERE pr_url = ?').bind(pr_url)
+    existing = await check_stmt.first()
+    was_new = existing is None
     
     stmt = db.prepare('''
         INSERT INTO prs (pr_url, repo_owner, repo_name, pr_number, title, state, 
@@ -1326,6 +1419,13 @@ async def upsert_pr(db, pr_url, owner, repo, pr_number, pr_data):
         pr_data['last_updated_at'], current_timestamp, current_timestamp
     )
     await stmt.run()
+    
+    # Get the PR ID
+    id_stmt = db.prepare('SELECT id FROM prs WHERE pr_url = ?').bind(pr_url)
+    result = await id_stmt.first()
+    pr_id = result.to_py()['id'] if result else None
+    
+    return (pr_id, was_new)
 
 async def handle_add_pr(request, env):
     """
@@ -1411,8 +1511,15 @@ async def handle_add_pr(request, env):
                     'last_updated_at': item.get('updated_at', ts)
                 }
                 
-                await upsert_pr(db, item['html_url'], owner, repo, item['number'], pr_data)
-                added_count += 1
+                pr_id, was_new = await upsert_pr(db, item['html_url'], owner, repo, item['number'], pr_data)
+                
+                # Record history if this is a new PR
+                if was_new and pr_id:
+                    await record_pr_history(
+                        db, pr_id, 'added', None,
+                        f"PR #{item['number']} added to tracker"
+                    )
+                    added_count += 1
             
             return Response.new(json.dumps({'success': True, 'message': f'Successfully imported {added_count} PRs'}), 
                               {'headers': {'Content-Type': 'application/json'}})
@@ -1440,7 +1547,14 @@ async def handle_add_pr(request, env):
                 return Response.new(json.dumps({'error': 'Cannot add merged/closed PRs'}), 
                                   {'status': 400, 'headers': {'Content-Type': 'application/json'}})
             
-            await upsert_pr(db, pr_url, parsed['owner'], parsed['repo'], parsed['pr_number'], pr_data)
+            pr_id, was_new = await upsert_pr(db, pr_url, parsed['owner'], parsed['repo'], parsed['pr_number'], pr_data)
+            
+            # Record history if this is a new PR
+            if was_new and pr_id:
+                await record_pr_history(
+                    db, pr_id, 'added', None,
+                    f"PR #{parsed['pr_number']} added to tracker"
+                )
             
             return Response.new(json.dumps({'success': True, 'data': pr_data}), 
                               {'headers': {'Content-Type': 'application/json'}})
@@ -1513,8 +1627,15 @@ async def handle_list_repos(env):
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 async def handle_refresh_pr(request, env):
-    """Refresh a specific PR's data"""
+    """Refresh a specific PR's data (requires authentication)"""
     try:
+        # Verify authentication
+        username = verify_auth_token(request)
+        if not username:
+            return Response.new(json.dumps({
+                'error': 'Authentication required. Please log in with GitHub to refresh PRs.'
+            }), {'status': 401, 'headers': {'Content-Type': 'application/json'}})
+        
         data = (await request.json()).to_py()
         pr_id = data.get('pr_id')
         user_token = request.headers.get('x-github-token')
@@ -1523,9 +1644,13 @@ async def handle_refresh_pr(request, env):
             return Response.new(json.dumps({'error': 'PR ID is required'}), 
                               {'status': 400, 'headers': {'Content-Type': 'application/json'}})
         
-        # Get PR URL from database
+        # Get PR URL and current state from database
         db = get_db(env)
-        stmt = db.prepare('SELECT pr_url, repo_owner, repo_name, pr_number FROM prs WHERE id = ?').bind(pr_id)
+        stmt = db.prepare('''
+            SELECT pr_url, repo_owner, repo_name, pr_number, state, review_status, 
+                   checks_passed, checks_failed, checks_skipped
+            FROM prs WHERE id = ?
+        ''').bind(pr_id)
         result = await stmt.first()
         
         if not result:
@@ -1533,19 +1658,65 @@ async def handle_refresh_pr(request, env):
                               {'status': 404, 'headers': {'Content-Type': 'application/json'}})
         
         # Convert JsProxy to Python dict to make it subscriptable
-        result = result.to_py()
+        old_state = result.to_py()
         
         # Fetch fresh data from GitHub (with Token)
-        pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'], user_token)
+        pr_data = await fetch_pr_data(old_state['repo_owner'], old_state['repo_name'], old_state['pr_number'], user_token)
         if not pr_data:
             return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
                               {'status': 403, 'headers': {'Content-Type': 'application/json'}})
         
+        # Detect changes before updating database
+        changes_detected = 0
+        
+        # Check for state change
+        if old_state['state'] != pr_data['state']:
+            changes_detected += 1
+            await record_pr_history(
+                db, pr_id, 'state_change', username,
+                f"State changed from {old_state['state']} to {pr_data['state']}",
+                json.dumps({'state': old_state['state']}),
+                json.dumps({'state': pr_data['state']})
+            )
+        
+        # Check for review status change
+        if old_state.get('review_status') != pr_data.get('review_status'):
+            changes_detected += 1
+            await record_pr_history(
+                db, pr_id, 'review_change', username,
+                f"Review status changed to {pr_data.get('review_status', 'unknown')}",
+                json.dumps({'review_status': old_state.get('review_status')}),
+                json.dumps({'review_status': pr_data.get('review_status')})
+            )
+        
+        # Check for checks change
+        old_checks = f"{old_state.get('checks_passed', 0)},{old_state.get('checks_failed', 0)},{old_state.get('checks_skipped', 0)}"
+        new_checks = f"{pr_data.get('checks_passed', 0)},{pr_data.get('checks_failed', 0)},{pr_data.get('checks_skipped', 0)}"
+        if old_checks != new_checks:
+            changes_detected += 1
+            await record_pr_history(
+                db, pr_id, 'checks_change', username,
+                f"Checks: {pr_data.get('checks_passed', 0)} passed, {pr_data.get('checks_failed', 0)} failed, {pr_data.get('checks_skipped', 0)} skipped",
+                json.dumps({
+                    'checks_passed': old_state.get('checks_passed', 0),
+                    'checks_failed': old_state.get('checks_failed', 0),
+                    'checks_skipped': old_state.get('checks_skipped', 0)
+                }),
+                json.dumps({
+                    'checks_passed': pr_data.get('checks_passed', 0),
+                    'checks_failed': pr_data.get('checks_failed', 0),
+                    'checks_skipped': pr_data.get('checks_skipped', 0)
+                })
+            )
+        
         # Check if PR is now merged or closed - delete it from database
         if pr_data['is_merged'] or pr_data['state'] == 'closed':
+            # Record the refresh before deletion
+            await record_pr_history(db, pr_id, 'refresh', username, f"PR refreshed by {username}")
+            
             # Invalidate caches since PR state changed
             await invalidate_readiness_cache(env, pr_id)
-            invalidate_timeline_cache(result['repo_owner'], result['repo_name'], result['pr_number'])
+            invalidate_timeline_cache(old_state['repo_owner'], old_state['repo_name'], old_state['pr_number'])
             
             # Delete the PR from database
             delete_stmt = db.prepare('DELETE FROM prs WHERE id = ?').bind(pr_id)
@@ -1558,15 +1729,66 @@ async def handle_refresh_pr(request, env):
                 'message': f'PR has been {status_msg} and removed from tracking'
             }), {'headers': {'Content-Type': 'application/json'}})
         
-        await upsert_pr(db, result['pr_url'], result['repo_owner'], result['repo_name'], result['pr_number'], pr_data)
+        await upsert_pr(db, old_state['pr_url'], old_state['repo_owner'], old_state['repo_name'], old_state['pr_number'], pr_data)
+        
+        # Record the refresh in history
+        await record_pr_history(db, pr_id, 'refresh', username, f"PR refreshed by {username}")
+        
+        # Get refresh count for response
+        count_stmt = db.prepare('''
+            SELECT COUNT(*) as count FROM pr_history 
+            WHERE pr_id = ? AND action_type = 'refresh'
+        ''').bind(pr_id)
+        count_result = await count_stmt.first()
+        refresh_count = count_result.to_py()['count'] if count_result else 0
         
         # Invalidate caches after successful refresh
         # This ensures cached results don't become stale after new commits or review activity
         await invalidate_readiness_cache(env, pr_id)
-        invalidate_timeline_cache(result['repo_owner'], result['repo_name'], result['pr_number'])
+        invalidate_timeline_cache(old_state['repo_owner'], old_state['repo_name'], old_state['pr_number'])
         
-        return Response.new(json.dumps({'success': True, 'data': pr_data}), 
-                          {'headers': {'Content-Type': 'application/json'}})
+        return Response.new(json.dumps({
+            'success': True, 
+            'data': pr_data,
+            'refresh_count': refresh_count,
+            'refreshed_by': username,
+            'changes_detected': changes_detected
+        }), {'headers': {'Content-Type': 'application/json'}})
+    except Exception as e:
+        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
+                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+
+async def handle_get_pr_history(env, pr_id):
+    """Get full activity history for a PR"""
+    try:
+        db = get_db(env)
+        
+        # Get all history entries
+        history_stmt = db.prepare('''
+            SELECT action_type, actor, description, before_state, after_state, created_at
+            FROM pr_history
+            WHERE pr_id = ?
+            ORDER BY created_at DESC
+        ''').bind(pr_id)
+        history_result = await history_stmt.all()
+        history = history_result.results.to_py() if hasattr(history_result, 'results') else []
+        
+        # Get refresh statistics
+        refresh_count_stmt = db.prepare('''
+            SELECT 
+                COUNT(*) as refresh_count,
+                COUNT(DISTINCT actor) as unique_users
+            FROM pr_history
+            WHERE pr_id = ? AND action_type = 'refresh'
+        ''').bind(pr_id)
+        stats_result = await refresh_count_stmt.first()
+        stats = stats_result.to_py() if stats_result else {'refresh_count': 0, 'unique_users': 0}
+        
+        return Response.new(json.dumps({
+            'refresh_count': stats['refresh_count'],
+            'unique_users': stats['unique_users'],
+            'history': history
+        }), {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
@@ -1992,7 +2214,7 @@ async def on_fetch(request, env):
     cors_headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, x-github-token',
+        'Access-Control-Allow-Headers': 'Content-Type, x-github-token, Authorization',
     }
     
     # Handle CORS preflight
@@ -2048,6 +2270,18 @@ async def on_fetch(request, env):
         for key, value in cors_headers.items():
             response.headers.set(key, value)
         return response
+    # PR history endpoint - GET /api/pr-history/{id}
+    elif path.startswith('/api/pr-history/') and request.method == 'GET':
+        pr_id = path.split('/')[-1]
+        try:
+            pr_id = int(pr_id)
+            response = await handle_get_pr_history(env, pr_id)
+            for key, value in cors_headers.items():
+                response.headers.set(key, value)
+            return response
+        except ValueError:
+            response = Response.new(json.dumps({'error': 'Invalid PR ID'}), 
+                                  {'status': 400, 'headers': {'Content-Type': 'application/json'}})
     
     # If no API route matched, try static assets or return 404
     if response is None:

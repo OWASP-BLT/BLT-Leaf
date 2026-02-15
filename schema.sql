@@ -44,6 +44,24 @@ CREATE TABLE IF NOT EXISTS prs (
 CREATE INDEX IF NOT EXISTS idx_repo ON prs(repo_owner, repo_name);
 CREATE INDEX IF NOT EXISTS idx_pr_number ON prs(pr_number);
 
+-- PR History table for tracking all PR activity
+-- Tracks refreshes, state changes, review changes, and other events
+CREATE TABLE IF NOT EXISTS pr_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pr_id INTEGER NOT NULL,
+    action_type TEXT NOT NULL, -- 'refresh', 'state_change', 'review_change', 'checks_change', 'added'
+    actor TEXT, -- GitHub username who performed the action
+    description TEXT, -- Human-readable description of the change
+    before_state TEXT, -- JSON snapshot of relevant state before change
+    after_state TEXT, -- JSON snapshot of relevant state after change
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (pr_id) REFERENCES prs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pr_history_pr_id ON pr_history(pr_id);
+CREATE INDEX IF NOT EXISTS idx_pr_history_actor ON pr_history(actor);
+CREATE INDEX IF NOT EXISTS idx_pr_history_action_type ON pr_history(action_type);
+
 -- Migration for existing databases (if needed manually)
 -- Run this if the automatic migration in init_database_schema fails:
 -- ALTER TABLE prs ADD COLUMN last_refreshed_at TEXT;
