@@ -43,9 +43,9 @@ _timeline_cache = {
 # Cache TTL in seconds (30 minutes - timeline data changes less frequently)
 _TIMELINE_CACHE_TTL = 1800
 
-def verify_auth_token(request):
+def extract_and_validate_username(request):
     """
-    Verify authentication token from Authorization header.
+    Extract and validate username from Authorization header.
     
     Extracts GitHub username from Authorization header.
     Format: Authorization: <username>
@@ -1630,7 +1630,7 @@ async def handle_refresh_pr(request, env):
     """Refresh a specific PR's data (requires authentication)"""
     try:
         # Verify authentication
-        username = verify_auth_token(request)
+        username = extract_and_validate_username(request)
         if not username:
             return Response.new(json.dumps({
                 'error': 'Authentication required. Please log in with GitHub to refresh PRs.'
@@ -1689,23 +1689,31 @@ async def handle_refresh_pr(request, env):
                 json.dumps({'review_status': pr_data.get('review_status')})
             )
         
-        # Check for checks change
-        old_checks = f"{old_state.get('checks_passed', 0)},{old_state.get('checks_failed', 0)},{old_state.get('checks_skipped', 0)}"
-        new_checks = f"{pr_data.get('checks_passed', 0)},{pr_data.get('checks_failed', 0)},{pr_data.get('checks_skipped', 0)}"
+        # Check for checks change using tuple comparison
+        old_checks = (
+            old_state.get('checks_passed', 0),
+            old_state.get('checks_failed', 0),
+            old_state.get('checks_skipped', 0)
+        )
+        new_checks = (
+            pr_data.get('checks_passed', 0),
+            pr_data.get('checks_failed', 0),
+            pr_data.get('checks_skipped', 0)
+        )
         if old_checks != new_checks:
             changes_detected += 1
             await record_pr_history(
                 db, pr_id, 'checks_change', username,
-                f"Checks: {pr_data.get('checks_passed', 0)} passed, {pr_data.get('checks_failed', 0)} failed, {pr_data.get('checks_skipped', 0)} skipped",
+                f"Checks: {new_checks[0]} passed, {new_checks[1]} failed, {new_checks[2]} skipped",
                 json.dumps({
-                    'checks_passed': old_state.get('checks_passed', 0),
-                    'checks_failed': old_state.get('checks_failed', 0),
-                    'checks_skipped': old_state.get('checks_skipped', 0)
+                    'checks_passed': old_checks[0],
+                    'checks_failed': old_checks[1],
+                    'checks_skipped': old_checks[2]
                 }),
                 json.dumps({
-                    'checks_passed': pr_data.get('checks_passed', 0),
-                    'checks_failed': pr_data.get('checks_failed', 0),
-                    'checks_skipped': pr_data.get('checks_skipped', 0)
+                    'checks_passed': new_checks[0],
+                    'checks_failed': new_checks[1],
+                    'checks_skipped': new_checks[2]
                 })
             )
         
