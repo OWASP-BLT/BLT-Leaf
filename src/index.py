@@ -676,32 +676,41 @@ def generate_state_token():
     """Generate a secure random state token for OAuth CSRF protection"""
     return secrets.token_urlsafe(32)
 
-def encrypt_token(token, secret):
+def sign_token(token, secret):
     """
-    Simple encryption for OAuth tokens using HMAC.
-    For production, consider using proper encryption library.
-    This provides basic protection at rest.
+    Sign OAuth token using HMAC-SHA256 for integrity verification.
+    
+    NOTE: This provides integrity/authentication, not confidentiality.
+    The token is stored as signature:plaintext_token format.
+    
+    For production deployments requiring encryption at rest:
+    - Use Cloudflare Workers Secrets (not stored in DB)
+    - Or implement AES-GCM encryption with a proper crypto library
+    - Or use Cloudflare KV with encryption enabled
+    
+    This approach is suitable when the database itself is secured
+    and provides a balance between security and implementation complexity.
     """
     if not secret:
         return token  # Fallback to plaintext if no secret configured
     
-    # Use HMAC-SHA256 for symmetric encryption
+    # Use HMAC-SHA256 for authentication/integrity
     key = secret.encode('utf-8')
     data = token.encode('utf-8')
     signature = hmac.new(key, data, hashlib.sha256).hexdigest()
-    # Store as signature:token (verifiable)
+    # Store as signature:token (integrity-protected)
     return f"{signature}:{token}"
 
-def decrypt_token(encrypted_token, secret):
-    """Decrypt OAuth token encrypted with encrypt_token"""
+def verify_token(signed_token, secret):
+    """Verify and extract token signed with sign_token"""
     if not secret:
-        return encrypted_token  # No encryption was used
+        return signed_token  # No signing was used
     
-    if ':' not in encrypted_token:
-        return encrypted_token  # Not encrypted format
+    if ':' not in signed_token:
+        return signed_token  # Not signed format
     
     try:
-        signature, token = encrypted_token.split(':', 1)
+        signature, token = signed_token.split(':', 1)
         key = secret.encode('utf-8')
         data = token.encode('utf-8')
         expected_signature = hmac.new(key, data, hashlib.sha256).hexdigest()
@@ -713,7 +722,7 @@ def decrypt_token(encrypted_token, secret):
             print("Warning: Token signature verification failed")
             return None
     except Exception as e:
-        print(f"Error decrypting token: {e}")
+        print(f"Error verifying token: {e}")
         return None
 
 async def create_user_session(env, github_user_id, github_username, github_avatar, access_token):
@@ -728,8 +737,8 @@ async def create_user_session(env, github_user_id, github_username, github_avata
         # Get session secret from environment
         session_secret = getattr(env, 'SESSION_SECRET', None)
         
-        # Encrypt the access token before storing
-        encrypted_token = encrypt_token(access_token, session_secret)
+        # Sign the access token before storing (integrity protection)
+        signed_token = sign_token(access_token, session_secret)
         
         # Store in database
         stmt = db.prepare('''
