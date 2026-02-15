@@ -62,6 +62,9 @@
     <h1>BLT-Leaf Frontend Tests</h1>
     <div id="test-results"></div>
 
+    <!-- Import shared utilities from production code -->
+    <script src="../public/static/utils.js"></script>
+
     <script>
         // Test framework
         const tests = [];
@@ -108,35 +111,8 @@
             };
         }
 
-        // Copy functions from index.html to test
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        function timeAgo(dateString) {
-            const date = new Date(dateString);
-            const now = new Date();
-            const seconds = Math.floor((now - date) / 1000);
-            const intervals = {
-                year: 31536000,
-                month: 2592000,
-                week: 604800,
-                day: 86400,
-                hour: 3600,
-                minute: 60,
-                second: 1
-            };
-
-            for (const [unit, value] of Object.entries(intervals)) {
-                const interval = Math.floor(seconds / value);
-                if (interval >= 1) {
-                    return interval === 1 ? `1 ${unit} ago` : `${interval} ${unit}s ago`;
-                }
-            }
-            return 'just now';
-        }
+        // Tests use the actual production functions imported from utils.js
+        // No duplicate implementations!
 
         // Define tests
         describe('escapeHtml', () => {
@@ -174,12 +150,11 @@
                 expect(result).toBe('just now');
             });
 
-            it('should return seconds ago', () => {
+            it('should return "just now" for times less than a minute', () => {
                 const date = new Date();
                 date.setSeconds(date.getSeconds() - 30);
                 const result = timeAgo(date.toISOString());
-                expect(result).toContain('second');
-                expect(result).toContain('ago');
+                expect(result).toBe('just now');
             });
 
             it('should return minutes ago', () => {

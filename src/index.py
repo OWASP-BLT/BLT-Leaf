@@ -4,6 +4,7 @@ import json
 import re
 import asyncio
 from datetime import datetime, timezone
+from url_utils import parse_pr_url
 
 # Track if schema initialization has been attempted in this worker instance
 # This is safe in Cloudflare Workers Python as each isolate runs single-threaded
@@ -34,37 +35,6 @@ _readiness_cache = {
 # Cache TTL in seconds (10 minutes)
 _READINESS_CACHE_TTL = 600
 
-def parse_pr_url(pr_url):
-    """
-    Parse GitHub PR URL to extract owner, repo, and PR number.
-    
-    Security Hardening (Issue #45):
-    - Type validation to prevent type confusion attacks
-    - Anchored regex pattern to block malformed URLs with trailing junk
-    - Raises ValueError instead of returning None for better error handling
-    """
-    # FIX Issue #45: Type validation
-    if not isinstance(pr_url, str):
-        raise ValueError("PR URL must be a string")
-    
-    if not pr_url:
-        raise ValueError("PR URL is required")
-    
-    pr_url = pr_url.strip().rstrip('/')
-    
-    # FIX Issue #45: Anchored regex - must match EXACTLY, no trailing junk allowed
-    pattern = r'^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$'
-    match = re.match(pattern, pr_url)
-    
-    if not match:
-        # FIX Issue #45: Raise error instead of returning None
-        raise ValueError("Invalid GitHub PR URL. Format: https://github.com/OWNER/REPO/pull/NUMBER")
-    
-    return {
-        'owner': match.group(1),
-        'repo': match.group(2),
-        'pr_number': int(match.group(3))
-    }
 
 def check_rate_limit(ip_address):
     """Check if request from IP is within rate limit for readiness endpoints.

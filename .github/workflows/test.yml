@@ -35,7 +35,7 @@ jobs:
         run: echo "Backend tests failed!"
 
   frontend-tests:
-    name: Frontend JavaScript Tests
+    name: Frontend Test Validation
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -8,7 +8,7 @@
     "db:create": "wrangler d1 create pr-tracker",
     "db:init": "wrangler d1 execute pr-tracker --file=./schema.sql",
     "test": "npm run test:backend",
-    "test:backend": "python3 -m unittest discover -s tests -p 'test_*.py' -v"
+    "test:backend": "python3 -m unittest discover -s tests -p \"test_*.py\" -v"
   },
   "keywords": [
     "github",

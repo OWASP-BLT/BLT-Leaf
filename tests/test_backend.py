@@ -8,8 +8,8 @@ import os
 # Add src to path to import the module
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-# Import from helpers module which has no Cloudflare dependencies
-from helpers import parse_pr_url
+# Import from url_utils module - single source of truth for parse_pr_url
+from url_utils import parse_pr_url
 
 
 class TestParsePRUrl(unittest.TestCase):
@@ -40,26 +40,37 @@ class TestParsePRUrl(unittest.TestCase):
         url = "https://github.com/facebook/react/pull/789/"
         result = parse_pr_url(url)
         
-        # re.match() matches from the start and the regex doesn't require end-of-string
-        # so it successfully matches the URL up to the PR number, ignoring the trailing slash
+        # The production code strips trailing slashes before matching
         self.assertIsNotNone(result)
         self.assertEqual(result['owner'], 'facebook')
         self.assertEqual(result['repo'], 'react')
         self.assertEqual(result['pr_number'], 789)
     
     def test_invalid_url_format(self):
-        """Test parsing an invalid URL format"""
+        """Test parsing an invalid URL format - should raise ValueError"""
         urls = [
             "https://github.com/owner/repo/issues/123",  # Issue, not PR
             "https://github.com/owner/repo",  # No PR number
             "https://gitlab.com/owner/repo/pull/123",  # Not GitHub
             "not-a-url",  # Not a URL at all
-            "",  # Empty string
         ]
         
         for url in urls:
-            result = parse_pr_url(url)
-            self.assertIsNone(result, f"Expected None for URL: {url}")
+            with self.assertRaises(ValueError, msg=f"Expected ValueError for URL: {url}"):
+                parse_pr_url(url)
+    
+    def test_empty_string(self):
+        """Test parsing empty string - should raise ValueError"""
+        with self.assertRaises(ValueError):
+            parse_pr_url("")
+    
+    def test_invalid_type(self):
+        """Test parsing non-string input - should raise ValueError"""
+        with self.assertRaises(ValueError):
+            parse_pr_url(None)
+        
+        with self.assertRaises(ValueError):
+            parse_pr_url(123)
     
     def test_large_pr_number(self):
         """Test parsing URL with a large PR number"""

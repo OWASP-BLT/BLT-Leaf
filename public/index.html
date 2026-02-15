@@ -121,6 +121,9 @@
         </main>
     </div>
 
+    <!-- Import shared utilities -->
+    <script src="./static/utils.js"></script>
+
     <script>
         let currentRepo = localStorage.getItem('currentRepo') || 'all';
         let allPrs = [];
@@ -167,11 +170,7 @@
         const repoItemIdleClasses = ['border-slate-200', 'bg-white', 'hover:border-slate-300', 'hover:bg-slate-50', 'dark:border-slate-700', 'dark:bg-slate-800', 'dark:hover:border-slate-600', 'dark:hover:bg-slate-700'];
         const repoItemActiveClasses = ['active', 'border-[#f5b0b0]', 'bg-[#fff1f1]', 'dark:border-red-900', 'dark:bg-red-950/30'];
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
+        // escapeHtml and timeAgo functions are imported from ./static/utils.js
 
         function setRepoItemActiveState(item, isActive) {
             item.className = '';
@@ -230,26 +229,7 @@
             }
         }
 
-        function timeAgo(dateString) {
-            const date = new Date(dateString);
-            const now = new Date();
-            const seconds = Math.floor((now - date) / 1000);
-            const intervals = {
-                year: 31536000,
-                month: 2592000,
-                week: 604800,
-                day: 86400,
-                hour: 3600,
-                minute: 60
-            };
-
-            for (const [name, value] of Object.entries(intervals)) {
-                const interval = Math.floor(seconds / value);
-                if (interval >= 1) return `${interval} ${name}${interval === 1 ? '' : 's'} ago`;
-            }
-
-            return 'just now';
-        }
+        // timeAgo function is imported from ./static/utils.js
 
         function sortPrs(column) {
             if (sortColumn === column) {
