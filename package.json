@@ -9,8 +9,6 @@
     "db:init": "wrangler d1 execute pr-tracker --file=./schema.sql",
     "test": "npm run test:backend",
     "test:backend": "python3 -m unittest discover -s tests -p \"test_*.py\" -v"
-    "lint": "echo 'Linting not configured yet' && exit 0",
-    "format:check": "echo 'Format checking not configured yet' && exit 0",
   },
   "keywords": [
     "github",
