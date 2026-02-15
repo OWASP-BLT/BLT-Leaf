@@ -59,6 +59,21 @@
                 <button id="themeToggle" class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:text-slate-400 dark:hover:bg-slate-700 dark:focus:ring-slate-600">
                     <i class="fas fa-moon" id="themeIcon"></i>
                 </button>
+                <!-- User Authentication -->
+                <div id="authContainer" class="flex items-center gap-2">
+                    <!-- Login button (shown when not authenticated) -->
+                    <button id="loginBtn" class="hidden rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 items-center gap-2 transition-colors shadow-sm">
+                        <i class="fab fa-github"></i> <span>Login with GitHub</span>
+                    </button>
+                    <!-- User profile (shown when authenticated) -->
+                    <div id="userProfile" class="hidden items-center gap-2">
+                        <img id="userAvatar" src="" alt="User" class="w-8 h-8 rounded-full border-2 border-red-500">
+                        <span id="userName" class="hidden md:inline text-sm font-medium text-slate-700 dark:text-slate-300"></span>
+                        <button id="logoutBtn" class="rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors">
+                            Logout
+                        </button>
+                    </div>
+                </div>
                 <a href="https://github.com/OWASP-BLT/BLT-Leaf" target="_blank" rel="noopener noreferrer"
                    class="hidden rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 md:inline-flex items-center gap-2 transition-colors shadow-sm">
                     <i class="fab fa-github"></i> <span>Contribute</span>
@@ -122,6 +137,157 @@
     </div>
 
     <script>
+        // OAuth and session management
+        let sessionToken = localStorage.getItem('blt_session_token');
+        let currentUser = null;
+
+        // Check authentication status on page load
+        async function checkAuth() {
+            if (!sessionToken) {
+                showLoginButton();
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${sessionToken}`
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.authenticated) {
+                        currentUser = data.user;
+                        showUserProfile(data.user);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+            }
+
+            // Session invalid, clear it
+            sessionToken = null;
+            localStorage.removeItem('blt_session_token');
+            showLoginButton();
+        }
+
+        function showLoginButton() {
+            document.getElementById('loginBtn').classList.remove('hidden');
+            document.getElementById('loginBtn').classList.add('flex');
+            document.getElementById('userProfile').classList.add('hidden');
+        }
+
+        function showUserProfile(user) {
+            document.getElementById('loginBtn').classList.add('hidden');
+            document.getElementById('userProfile').classList.remove('hidden');
+            document.getElementById('userProfile').classList.add('flex');
+            document.getElementById('userAvatar').src = user.avatar_url || '';
+            document.getElementById('userName').textContent = user.username || '';
+        }
+
+        // Handle login button click
+        document.getElementById('loginBtn')?.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/auth/github');
+                const data = await response.json();
+                
+                if (data.redirect_url) {
+                    // Store current location to redirect back after OAuth
+                    localStorage.setItem('oauth_return_url', window.location.href);
+                    // Redirect to GitHub OAuth
+                    window.location.href = data.redirect_url;
+                } else {
+                    showError('Failed to initiate login');
+                }
+            } catch (error) {
+                console.error('Login failed:', error);
+                showError('Failed to initiate login');
+            }
+        });
+
+        // Handle logout button click
+        document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+            if (!sessionToken) return;
+
+            try {
+                await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${sessionToken}`
+                    }
+                });
+            } catch (error) {
+                console.error('Logout request failed:', error);
+            }
+
+            // Clear local session
+            sessionToken = null;
+            currentUser = null;
+            localStorage.removeItem('blt_session_token');
+            showLoginButton();
+            showSuccess('Logged out successfully');
+        });
+
+        // Handle OAuth callback
+        async function handleOAuthCallback() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const state = urlParams.get('state');
+
+            if (code) {
+                try {
+                    // Exchange code for session token
+                    const response = await fetch(`/api/auth/github/callback?code=${code}&state=${state || ''}`);
+                    const data = await response.json();
+
+                    if (data.success && data.session_token) {
+                        // Save session token
+                        sessionToken = data.session_token;
+                        localStorage.setItem('blt_session_token', sessionToken);
+                        currentUser = data.user;
+
+                        // Clean up URL
+                        const returnUrl = localStorage.getItem('oauth_return_url') || '/';
+                        localStorage.removeItem('oauth_return_url');
+                        
+                        // Show success message
+                        showSuccess(`Welcome back, ${data.user.username}!`);
+                        
+                        // Redirect to original page
+                        window.history.replaceState({}, document.title, returnUrl);
+                        
+                        // Update UI
+                        showUserProfile(data.user);
+                        
+                        // Refresh PR list with user's token
+                        loadPrs();
+                    } else {
+                        showError(data.error || 'Failed to complete login');
+                        // Clean up URL
+                        window.history.replaceState({}, document.title, '/');
+                    }
+                } catch (error) {
+                    console.error('OAuth callback failed:', error);
+                    showError('Failed to complete login');
+                    // Clean up URL
+                    window.history.replaceState({}, document.title, '/');
+                }
+            }
+        }
+
+        // Helper function to add Authorization header to API calls
+        function getAuthHeaders() {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            if (sessionToken) {
+                headers['Authorization'] = `Bearer ${sessionToken}`;
+            }
+            return headers;
+        }
+
         let currentRepo = localStorage.getItem('currentRepo') || 'all';
         let allPrs = [];
         let repos = [];
@@ -320,6 +486,30 @@
             setTimeout(() => {
                 errorDiv.textContent = '';
             }, 5000);
+        }
+
+        function showSuccess(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = '';
+
+            const toastElement = document.createElement('div');
+            toastElement.className = 'flex items-start gap-2 rounded-lg border border-green-200 border-l-4 border-l-green-600 bg-white px-3 py-2.5 text-sm text-green-900 shadow-lg dark:bg-slate-800 dark:text-green-100';
+
+            const iconElement = document.createElement('span');
+            iconElement.className = 'inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-green-100 text-xs font-bold text-green-700';
+            iconElement.innerHTML = '✓';
+
+            const textElement = document.createElement('div');
+            textElement.className = 'leading-5';
+            textElement.textContent = message;
+
+            toastElement.appendChild(iconElement);
+            toastElement.appendChild(textElement);
+            errorDiv.appendChild(toastElement);
+
+            setTimeout(() => {
+                errorDiv.textContent = '';
+            }, 3000);
         }
 
         async function loadRepos() {
@@ -701,9 +891,7 @@
                 // Step 1: Refresh PR data from GitHub
                 const refreshResponse = await fetch('/api/refresh', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({ pr_id: prId })
                 });
 
@@ -902,9 +1090,7 @@
                 // But preserving your existing logic structure:
                 const response = await fetch('/api/prs', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({ 
                         pr_url: prUrl,
                         add_all: addAll
@@ -983,11 +1169,25 @@
         // Make sortPrs globally accessible for onclick handlers
         window.sortPrs = sortPrs;
 
-        initTheme();
-        loadRateLimit();
-        loadRepos();
-        loadPrs();
-        setInterval(loadRateLimit, 600000);
+        // Initialize app
+        async function initApp() {
+            initTheme();
+            
+            // Check OAuth callback first
+            await handleOAuthCallback();
+            
+            // Check authentication status
+            await checkAuth();
+            
+            // Load data
+            loadRateLimit();
+            loadRepos();
+            loadPrs();
+            setInterval(loadRateLimit, 600000);
+        }
+
+        // Start the app
+        initApp();
     </script>
 </body>
 </html>
