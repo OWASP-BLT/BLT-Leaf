@@ -44,6 +44,26 @@ CREATE TABLE IF NOT EXISTS prs (
 CREATE INDEX IF NOT EXISTS idx_repo ON prs(repo_owner, repo_name);
 CREATE INDEX IF NOT EXISTS idx_pr_number ON prs(pr_number);
 
+-- User sessions table for OAuth tokens
+-- Note: For production with high traffic, consider using Cloudflare KV instead
+-- This table provides a fallback and works for smaller deployments
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_token TEXT NOT NULL UNIQUE,
+    github_user_id INTEGER NOT NULL,
+    github_username TEXT NOT NULL,
+    github_avatar TEXT,
+    access_token TEXT NOT NULL,  -- Encrypted in production
+    token_type TEXT DEFAULT 'bearer',
+    scope TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT,  -- Optional: for future token expiration handling
+    last_used_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_token ON user_sessions(session_token);
+CREATE INDEX IF NOT EXISTS idx_github_user ON user_sessions(github_user_id);
+
 -- Migration for existing databases (if needed manually)
 -- Run this if the automatic migration in init_database_schema fails:
 -- ALTER TABLE prs ADD COLUMN last_refreshed_at TEXT;

@@ -11,6 +11,14 @@ database_id = "014201e7-6c0e-4b6a-8c0e-c53d18305dca"
 [vars]
 ENVIRONMENT = "production"
 
+# NOTE: For production deployment, set these secrets using wrangler:
+# wrangler secret put GITHUB_OAUTH_CLIENT_ID
+# wrangler secret put GITHUB_OAUTH_CLIENT_SECRET  
+# wrangler secret put SESSION_SECRET
+# 
+# These values are NOT stored in this file for security reasons.
+# For local development, you can use .dev.vars file (see .env.example)
+
 # Configure assets (static files)
 [assets]
 directory = "./public"

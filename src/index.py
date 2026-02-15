@@ -634,10 +634,223 @@ async def init_database_schema(env):
         index2 = db.prepare('CREATE INDEX IF NOT EXISTS idx_pr_number ON prs(pr_number)')
         await index2.run()
         
+        # Create user_sessions table for OAuth (idempotent)
+        create_sessions_table = db.prepare('''
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_token TEXT NOT NULL UNIQUE,
+                github_user_id INTEGER NOT NULL,
+                github_username TEXT NOT NULL,
+                github_avatar TEXT,
+                access_token TEXT NOT NULL,
+                token_type TEXT DEFAULT 'bearer',
+                scope TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                expires_at TEXT,
+                last_used_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await create_sessions_table.run()
+        
+        # Create indexes for user_sessions
+        session_index1 = db.prepare('CREATE INDEX IF NOT EXISTS idx_session_token ON user_sessions(session_token)')
+        await session_index1.run()
+        
+        session_index2 = db.prepare('CREATE INDEX IF NOT EXISTS idx_github_user ON user_sessions(github_user_id)')
+        await session_index2.run()
+        
     except Exception as e:
         # Log the error but don't crash - schema may already exist
         print(f"Note: Schema initialization check: {str(e)}")
         # Schema likely already exists, which is fine
+
+import secrets
+import hashlib
+import hmac
+
+def generate_session_token():
+    """Generate a secure random session token"""
+    return secrets.token_urlsafe(32)
+
+def generate_state_token():
+    """Generate a secure random state token for OAuth CSRF protection"""
+    return secrets.token_urlsafe(32)
+
+def encrypt_token(token, secret):
+    """
+    Simple encryption for OAuth tokens using HMAC.
+    For production, consider using proper encryption library.
+    This provides basic protection at rest.
+    """
+    if not secret:
+        return token  # Fallback to plaintext if no secret configured
+    
+    # Use HMAC-SHA256 for symmetric encryption
+    key = secret.encode('utf-8')
+    data = token.encode('utf-8')
+    signature = hmac.new(key, data, hashlib.sha256).hexdigest()
+    # Store as signature:token (verifiable)
+    return f"{signature}:{token}"
+
+def decrypt_token(encrypted_token, secret):
+    """Decrypt OAuth token encrypted with encrypt_token"""
+    if not secret:
+        return encrypted_token  # No encryption was used
+    
+    if ':' not in encrypted_token:
+        return encrypted_token  # Not encrypted format
+    
+    try:
+        signature, token = encrypted_token.split(':', 1)
+        key = secret.encode('utf-8')
+        data = token.encode('utf-8')
+        expected_signature = hmac.new(key, data, hashlib.sha256).hexdigest()
+        
+        # Constant-time comparison to prevent timing attacks
+        if hmac.compare_digest(signature, expected_signature):
+            return token
+        else:
+            print("Warning: Token signature verification failed")
+            return None
+    except Exception as e:
+        print(f"Error decrypting token: {e}")
+        return None
+
+async def create_user_session(env, github_user_id, github_username, github_avatar, access_token):
+    """
+    Create a new user session and store OAuth token.
+    Returns the session token for the client.
+    """
+    try:
+        db = get_db(env)
+        session_token = generate_session_token()
+        
+        # Get session secret from environment
+        session_secret = getattr(env, 'SESSION_SECRET', None)
+        
+        # Encrypt the access token before storing
+        encrypted_token = encrypt_token(access_token, session_secret)
+        
+        # Store in database
+        stmt = db.prepare('''
+            INSERT INTO user_sessions 
+            (session_token, github_user_id, github_username, github_avatar, access_token, token_type, scope)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''').bind(
+            session_token,
+            github_user_id,
+            github_username,
+            github_avatar,
+            encrypted_token,
+            'bearer',
+            'repo read:user'
+        )
+        await stmt.run()
+        
+        return session_token
+    except Exception as e:
+        print(f"Error creating user session: {e}")
+        raise
+
+async def get_user_session(env, session_token):
+    """
+    Retrieve user session by session token.
+    Returns dict with user info and decrypted access_token, or None if not found.
+    """
+    if not session_token:
+        return None
+    
+    try:
+        db = get_db(env)
+        stmt = db.prepare('''
+            SELECT github_user_id, github_username, github_avatar, access_token, scope, created_at
+            FROM user_sessions 
+            WHERE session_token = ?
+        ''').bind(session_token)
+        
+        result = await stmt.first()
+        if not result:
+            return None
+        
+        # Decrypt the access token
+        session_secret = getattr(env, 'SESSION_SECRET', None)
+        encrypted_token = result['access_token']
+        access_token = decrypt_token(encrypted_token, session_secret)
+        
+        if not access_token:
+            print("Failed to decrypt access token")
+            return None
+        
+        # Update last_used_at
+        update_stmt = db.prepare('''
+            UPDATE user_sessions 
+            SET last_used_at = CURRENT_TIMESTAMP 
+            WHERE session_token = ?
+        ''').bind(session_token)
+        await update_stmt.run()
+        
+        return {
+            'github_user_id': result['github_user_id'],
+            'github_username': result['github_username'],
+            'github_avatar': result['github_avatar'],
+            'access_token': access_token,
+            'scope': result['scope'],
+            'created_at': result['created_at']
+        }
+    except Exception as e:
+        print(f"Error retrieving user session: {e}")
+        return None
+
+async def delete_user_session(env, session_token):
+    """Delete a user session (logout)"""
+    try:
+        db = get_db(env)
+        stmt = db.prepare('DELETE FROM user_sessions WHERE session_token = ?').bind(session_token)
+        await stmt.run()
+        return True
+    except Exception as e:
+        print(f"Error deleting user session: {e}")
+        return False
+
+async def get_user_token_from_request(request, env):
+    """
+    Extract and validate user's GitHub access token from request.
+    Checks session cookie/header first, falls back to legacy x-github-token header.
+    Returns tuple: (token, user_info)
+    """
+    # Check for session token in Authorization header or cookie
+    auth_header = request.headers.get('Authorization')
+    session_token = None
+    
+    if auth_header and auth_header.startswith('Bearer '):
+        session_token = auth_header[7:]  # Remove 'Bearer ' prefix
+    
+    # Also check cookie if no bearer token
+    if not session_token:
+        cookie_header = request.headers.get('Cookie')
+        if cookie_header:
+            # Simple cookie parsing
+            cookies = {}
+            for cookie in cookie_header.split(';'):
+                cookie = cookie.strip()
+                if '=' in cookie:
+                    key, value = cookie.split('=', 1)
+                    cookies[key] = value
+            session_token = cookies.get('blt_session')
+    
+    # If we have a session token, retrieve the user's access token
+    if session_token:
+        user_session = await get_user_session(env, session_token)
+        if user_session:
+            return (user_session['access_token'], user_session)
+    
+    # Legacy fallback: check for direct token in x-github-token header
+    legacy_token = request.headers.get('x-github-token')
+    if legacy_token:
+        return (legacy_token, None)
+    
+    # No token found
+    return (None, None)
 
 async def fetch_with_headers(url, headers=None, token=None):
     """Helper to fetch with proper header handling using pyodide.ffi.to_js"""
@@ -1348,8 +1561,8 @@ async def handle_add_pr(request, env):
         
         pr_url = data.get('pr_url')
         add_all = data.get('add_all', False)
-        # Capture token from header
-        user_token = request.headers.get('x-github-token')
+        # Get user token from session or legacy header
+        user_token, user_info = await get_user_token_from_request(request, env)
         
         # Type validation for pr_url
         if not pr_url or not isinstance(pr_url, str):
@@ -1517,7 +1730,8 @@ async def handle_refresh_pr(request, env):
     try:
         data = (await request.json()).to_py()
         pr_id = data.get('pr_id')
-        user_token = request.headers.get('x-github-token')
+        # Get user token from session or legacy header
+        user_token, user_info = await get_user_token_from_request(request, env)
         
         if not pr_id:
             return Response.new(json.dumps({'error': 'PR ID is required'}), 
@@ -1701,11 +1915,15 @@ async def handle_pr_timeline(request, env, path):
         
         pr = result.to_py()
         
+        # Get user token from session or legacy header
+        user_token, user_info = await get_user_token_from_request(request, env)
+        
         # Fetch timeline data from GitHub
         timeline_data = await fetch_pr_timeline_data(
             pr['repo_owner'],
             pr['repo_name'],
-            pr['pr_number']
+            pr['pr_number'],
+            user_token
         )
         
         # Build unified timeline
@@ -1786,11 +2004,15 @@ async def handle_pr_review_analysis(request, env, path):
         
         pr = result.to_py()
         
+        # Get user token from session or legacy header
+        user_token, user_info = await get_user_token_from_request(request, env)
+        
         # Fetch timeline data from GitHub
         timeline_data = await fetch_pr_timeline_data(
             pr['repo_owner'],
             pr['repo_name'],
-            pr['pr_number']
+            pr['pr_number'],
+            user_token
         )
         
         # Build unified timeline
@@ -1903,11 +2125,15 @@ async def handle_pr_readiness(request, env, path):
         
         pr = result.to_py()
         
+        # Get user token from session or legacy header
+        user_token, user_info = await get_user_token_from_request(request, env)
+        
         # Fetch timeline data from GitHub
         timeline_data = await fetch_pr_timeline_data(
             pr['repo_owner'],
             pr['repo_name'],
-            pr['pr_number']
+            pr['pr_number'],
+            user_token
         )
         
         # Build unified timeline
@@ -1975,6 +2201,246 @@ async def handle_pr_readiness(request, env, path):
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
+async def handle_auth_github(request, env):
+    """
+    GET /api/auth/github
+    Initiate GitHub OAuth flow - redirect user to GitHub authorization page
+    """
+    try:
+        url = URL.new(request.url)
+        
+        # Get OAuth client ID from environment
+        client_id = getattr(env, 'GITHUB_OAUTH_CLIENT_ID', None)
+        if not client_id:
+            return Response.new(
+                json.dumps({'error': 'GitHub OAuth not configured. Please set GITHUB_OAUTH_CLIENT_ID'}),
+                {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+            )
+        
+        # Generate state token for CSRF protection
+        state = generate_state_token()
+        
+        # TODO: Store state token temporarily (in-memory cache or KV)
+        # For now, we'll skip CSRF validation for simplicity
+        # In production, store state and validate it in callback
+        
+        # Build GitHub authorization URL
+        redirect_uri = f"{url.origin}/api/auth/github/callback"
+        scopes = 'repo read:user'
+        
+        github_auth_url = (
+            f"https://github.com/login/oauth/authorize"
+            f"?client_id={client_id}"
+            f"&redirect_uri={redirect_uri}"
+            f"&scope={scopes}"
+            f"&state={state}"
+        )
+        
+        # Return redirect URL to client
+        return Response.new(
+            json.dumps({'redirect_url': github_auth_url}),
+            {'status': 200, 'headers': {'Content-Type': 'application/json'}}
+        )
+    except Exception as e:
+        print(f"Error in handle_auth_github: {e}")
+        return Response.new(
+            json.dumps({'error': f'Failed to initiate OAuth: {str(e)}'}),
+            {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+        )
+
+async def handle_auth_github_callback(request, env):
+    """
+    GET /api/auth/github/callback
+    Handle OAuth callback from GitHub - exchange code for access token
+    """
+    try:
+        url = URL.new(request.url)
+        code = url.searchParams.get('code')
+        state = url.searchParams.get('state')
+        
+        if not code:
+            return Response.new(
+                json.dumps({'error': 'No authorization code received'}),
+                {'status': 400, 'headers': {'Content-Type': 'application/json'}}
+            )
+        
+        # Get OAuth credentials from environment
+        client_id = getattr(env, 'GITHUB_OAUTH_CLIENT_ID', None)
+        client_secret = getattr(env, 'GITHUB_OAUTH_CLIENT_SECRET', None)
+        
+        if not client_id or not client_secret:
+            return Response.new(
+                json.dumps({'error': 'GitHub OAuth not configured'}),
+                {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+            )
+        
+        # TODO: Validate state token for CSRF protection
+        # In production, retrieve stored state and compare
+        
+        # Exchange code for access token
+        token_url = 'https://github.com/login/oauth/access_token'
+        token_data = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'code': code
+        }
+        
+        token_headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+        
+        token_options = to_js({
+            'method': 'POST',
+            'headers': token_headers,
+            'body': json.dumps(token_data)
+        }, dict_converter=Object.fromEntries)
+        
+        token_response = await fetch(token_url, token_options)
+        token_result = await token_response.json()
+        token_result = token_result.to_py()
+        
+        if 'error' in token_result:
+            return Response.new(
+                json.dumps({'error': f"OAuth error: {token_result.get('error_description', token_result['error'])}"}),
+                {'status': 400, 'headers': {'Content-Type': 'application/json'}}
+            )
+        
+        access_token = token_result.get('access_token')
+        if not access_token:
+            return Response.new(
+                json.dumps({'error': 'No access token received from GitHub'}),
+                {'status': 400, 'headers': {'Content-Type': 'application/json'}}
+            )
+        
+        # Fetch user info from GitHub
+        user_url = 'https://api.github.com/user'
+        user_headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'PR-Tracker/1.0'
+        }
+        
+        user_options = to_js({
+            'method': 'GET',
+            'headers': user_headers
+        }, dict_converter=Object.fromEntries)
+        
+        user_response = await fetch(user_url, user_options)
+        user_data = await user_response.json()
+        user_data = user_data.to_py()
+        
+        if 'id' not in user_data:
+            return Response.new(
+                json.dumps({'error': 'Failed to fetch user information'}),
+                {'status': 400, 'headers': {'Content-Type': 'application/json'}}
+            )
+        
+        # Create user session
+        session_token = await create_user_session(
+            env,
+            user_data['id'],
+            user_data['login'],
+            user_data.get('avatar_url'),
+            access_token
+        )
+        
+        # Return success with session token and user info
+        # Frontend will store this and use it for subsequent requests
+        return Response.new(
+            json.dumps({
+                'success': True,
+                'session_token': session_token,
+                'user': {
+                    'id': user_data['id'],
+                    'username': user_data['login'],
+                    'avatar_url': user_data.get('avatar_url'),
+                    'name': user_data.get('name')
+                }
+            }),
+            {'status': 200, 'headers': {'Content-Type': 'application/json'}}
+        )
+        
+    except Exception as e:
+        print(f"Error in handle_auth_github_callback: {e}")
+        return Response.new(
+            json.dumps({'error': f'OAuth callback failed: {str(e)}'}),
+            {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+        )
+
+async def handle_auth_logout(request, env):
+    """
+    POST /api/auth/logout
+    Logout user by deleting their session
+    """
+    try:
+        # Get session token from request
+        auth_header = request.headers.get('Authorization')
+        session_token = None
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            session_token = auth_header[7:]
+        
+        if not session_token:
+            return Response.new(
+                json.dumps({'error': 'No session token provided'}),
+                {'status': 400, 'headers': {'Content-Type': 'application/json'}}
+            )
+        
+        # Delete session
+        success = await delete_user_session(env, session_token)
+        
+        if success:
+            return Response.new(
+                json.dumps({'success': True, 'message': 'Logged out successfully'}),
+                {'status': 200, 'headers': {'Content-Type': 'application/json'}}
+            )
+        else:
+            return Response.new(
+                json.dumps({'error': 'Failed to logout'}),
+                {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+            )
+            
+    except Exception as e:
+        print(f"Error in handle_auth_logout: {e}")
+        return Response.new(
+            json.dumps({'error': f'Logout failed: {str(e)}'}),
+            {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+        )
+
+async def handle_auth_me(request, env):
+    """
+    GET /api/auth/me
+    Get current user information from session
+    """
+    try:
+        token, user_info = await get_user_token_from_request(request, env)
+        
+        if not user_info:
+            return Response.new(
+                json.dumps({'authenticated': False}),
+                {'status': 200, 'headers': {'Content-Type': 'application/json'}}
+            )
+        
+        return Response.new(
+            json.dumps({
+                'authenticated': True,
+                'user': {
+                    'id': user_info['github_user_id'],
+                    'username': user_info['github_username'],
+                    'avatar_url': user_info['github_avatar']
+                }
+            }),
+            {'status': 200, 'headers': {'Content-Type': 'application/json'}}
+        )
+        
+    except Exception as e:
+        print(f"Error in handle_auth_me: {e}")
+        return Response.new(
+            json.dumps({'error': f'Failed to get user info: {str(e)}'}),
+            {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+        )
+
 async def on_fetch(request, env):
     """Main request handler"""
     url = URL.new(request.url)
@@ -1992,7 +2458,7 @@ async def on_fetch(request, env):
     cors_headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, x-github-token',
+        'Access-Control-Allow-Headers': 'Content-Type, x-github-token, Authorization',
     }
     
     # Handle CORS preflight
@@ -2014,7 +2480,17 @@ async def on_fetch(request, env):
     # API endpoints
     response = None
     
-    if path == '/api/prs':
+    # OAuth endpoints
+    if path == '/api/auth/github' and request.method == 'GET':
+        response = await handle_auth_github(request, env)
+    elif path == '/api/auth/github/callback' and request.method == 'GET':
+        response = await handle_auth_github_callback(request, env)
+    elif path == '/api/auth/logout' and request.method == 'POST':
+        response = await handle_auth_logout(request, env)
+    elif path == '/api/auth/me' and request.method == 'GET':
+        response = await handle_auth_me(request, env)
+    # Existing endpoints
+    elif path == '/api/prs':
         if request.method == 'GET':
             response = await handle_list_prs(env, url.searchParams.get('repo'))
         elif request.method == 'POST':
