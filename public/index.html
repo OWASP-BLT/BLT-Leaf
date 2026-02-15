@@ -465,8 +465,19 @@
                             Loading refresh count...
                         </div>
                         <div class="flex items-center gap-2">
+                            <button class="history-expand-btn rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-400 hover:text-slate-900" data-pr-id="${pr.id}">
+                                <span class="expand-icon">▸</span> History
+                            </button>
                             <button class="refresh-btn rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-400 hover:text-slate-900" data-pr-id="${pr.id}">Refresh</button>
                             ${pr.last_refreshed_at ? `<span class="text-xs text-slate-500">(last refreshed ${escapeHtml(timeAgo(pr.last_refreshed_at))})</span>` : ''}
+                        </div>
+                    </div>
+                    
+                    <!-- Hidden history timeline -->
+                    <div class="history-timeline hidden mt-4 border-t border-slate-200 pt-4" id="history-${pr.id}">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Activity Timeline</div>
+                        <div class="history-content text-xs text-slate-500">
+                            Loading history...
                         </div>
                     </div>
                 `;
@@ -475,6 +486,14 @@
                 
                 // Fetch and display refresh count
                 fetchRefreshCount(pr.id);
+            });
+
+            // Add event listeners for history expand buttons
+            document.querySelectorAll('.history-expand-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const prId = e.currentTarget.dataset.prId;
+                    await toggleHistory(prId, e.currentTarget);
+                });
             });
 
             document.querySelectorAll('.refresh-btn').forEach(btn => {
@@ -487,7 +506,8 @@
 
         async function fetchRefreshCount(prId) {
             try {
-                const response = await fetch(`/api/refresh-history/${prId}`);
+                // Use new endpoint (also works with legacy endpoint)
+                const response = await fetch(`/api/pr-history/${prId}`);
                 const data = await response.json();
                 
                 const infoEl = document.getElementById(`refresh-info-${prId}`);
@@ -508,6 +528,100 @@
                     infoEl.textContent = '';
                 }
             }
+        }
+
+        async function toggleHistory(prId, button) {
+            const timeline = document.getElementById(`history-${prId}`);
+            const icon = button.querySelector('.expand-icon');
+            
+            if (timeline.classList.contains('hidden')) {
+                // Expand - load and show history
+                icon.textContent = '▾';
+                timeline.classList.remove('hidden');
+                
+                // Load history if not already loaded
+                if (!timeline.dataset.loaded) {
+                    await loadHistory(prId);
+                    timeline.dataset.loaded = 'true';
+                }
+            } else {
+                // Collapse
+                icon.textContent = '▸';
+                timeline.classList.add('hidden');
+            }
+        }
+
+        async function loadHistory(prId) {
+            const timeline = document.getElementById(`history-${prId}`);
+            const contentDiv = timeline.querySelector('.history-content');
+            
+            try {
+                contentDiv.textContent = 'Loading history...';
+                const response = await fetch(`/api/pr-history/${prId}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    contentDiv.textContent = `Error: ${data.error}`;
+                    return;
+                }
+                
+                if (!data.history || data.history.length === 0) {
+                    contentDiv.textContent = 'No history available';
+                    return;
+                }
+                
+                // Render timeline
+                renderTimeline(contentDiv, data.history);
+            } catch (error) {
+                console.error('Error loading history:', error);
+                contentDiv.textContent = 'Failed to load history';
+            }
+        }
+
+        function renderTimeline(container, history) {
+            // Create compact timeline view
+            container.innerHTML = '';
+            
+            const timelineList = document.createElement('div');
+            timelineList.className = 'space-y-2 max-h-96 overflow-y-auto';
+            
+            history.forEach((entry, index) => {
+                const item = document.createElement('div');
+                item.className = 'flex gap-2 text-xs';
+                
+                // Icon based on action type
+                let icon = '●';
+                let iconColor = 'text-slate-400';
+                if (entry.action_type === 'refresh') {
+                    icon = '🔄';
+                } else if (entry.action_type === 'state_change') {
+                    icon = '📝';
+                    iconColor = 'text-blue-500';
+                } else if (entry.action_type === 'review_change') {
+                    icon = '👁';
+                    iconColor = 'text-purple-500';
+                } else if (entry.action_type === 'checks_change') {
+                    icon = '✓';
+                    iconColor = 'text-emerald-500';
+                } else if (entry.action_type === 'added') {
+                    icon = '➕';
+                    iconColor = 'text-green-500';
+                }
+                
+                item.innerHTML = `
+                    <span class="${iconColor}">${icon}</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-slate-700">${escapeHtml(entry.description || entry.action_type)}</div>
+                        <div class="text-slate-400 text-[10px] mt-0.5">
+                            ${entry.actor ? `by ${escapeHtml(entry.actor)} · ` : ''}${escapeHtml(timeAgo(entry.created_at))}
+                        </div>
+                    </div>
+                `;
+                
+                timelineList.appendChild(item);
+            });
+            
+            container.appendChild(timelineList);
         }
 
         async function addPr() {

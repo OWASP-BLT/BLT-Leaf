@@ -89,6 +89,28 @@ def get_db(env):
     print(f"DEBUG: env attributes: {dir(env)}")
     raise Exception("Database binding 'pr_tracker' or 'DB' not found in env. Please configure a D1 database.")
 
+async def record_pr_history(db, pr_id, action_type, actor=None, description=None, before_state=None, after_state=None):
+    """Record a PR history entry
+    
+    Args:
+        db: Database connection
+        pr_id: PR ID
+        action_type: Type of action ('refresh', 'state_change', 'review_change', 'checks_change', 'added')
+        actor: GitHub username who performed the action (optional)
+        description: Human-readable description of the change (optional)
+        before_state: JSON string of state before change (optional)
+        after_state: JSON string of state after change (optional)
+    """
+    current_timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    
+    stmt = db.prepare('''
+        INSERT INTO pr_history (pr_id, action_type, actor, description, before_state, after_state, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''').bind(pr_id, action_type, actor, description, before_state, after_state, current_timestamp)
+    
+    await stmt.run()
+
+
 async def init_database_schema(env):
     """Initialize database schema if it doesn't exist.
     
@@ -159,24 +181,59 @@ async def init_database_schema(env):
         index2 = db.prepare('CREATE INDEX IF NOT EXISTS idx_pr_number ON prs(pr_number)')
         await index2.run()
         
-        # Create refresh_history table (idempotent with IF NOT EXISTS)
-        create_refresh_history = db.prepare('''
-            CREATE TABLE IF NOT EXISTS refresh_history (
+        # Create pr_history table (idempotent with IF NOT EXISTS)
+        # This replaces the old refresh_history table with a more comprehensive history tracking
+        create_pr_history = db.prepare('''
+            CREATE TABLE IF NOT EXISTS pr_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pr_id INTEGER NOT NULL,
-                refreshed_by TEXT NOT NULL,
-                refreshed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                action_type TEXT NOT NULL,
+                actor TEXT,
+                description TEXT,
+                before_state TEXT,
+                after_state TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (pr_id) REFERENCES prs(id) ON DELETE CASCADE
             )
         ''')
-        await create_refresh_history.run()
+        await create_pr_history.run()
         
-        # Create indexes for refresh_history table
-        index3 = db.prepare('CREATE INDEX IF NOT EXISTS idx_refresh_pr_id ON refresh_history(pr_id)')
+        # Create indexes for pr_history table
+        index3 = db.prepare('CREATE INDEX IF NOT EXISTS idx_history_pr_id ON pr_history(pr_id)')
         await index3.run()
         
-        index4 = db.prepare('CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_history(refreshed_by)')
+        index4 = db.prepare('CREATE INDEX IF NOT EXISTS idx_history_actor ON pr_history(actor)')
         await index4.run()
+        
+        index5 = db.prepare('CREATE INDEX IF NOT EXISTS idx_history_action_type ON pr_history(action_type)')
+        await index5.run()
+        
+        index6 = db.prepare('CREATE INDEX IF NOT EXISTS idx_history_created_at ON pr_history(created_at)')
+        await index6.run()
+        
+        # Migration: Migrate data from old refresh_history table to pr_history if it exists
+        try:
+            # Check if old refresh_history table exists
+            check_old_table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='refresh_history'")
+            old_table_result = await check_old_table.first()
+            
+            if old_table_result:
+                print("Migrating data from refresh_history to pr_history...")
+                # Copy data from refresh_history to pr_history
+                migrate_data = db.prepare('''
+                    INSERT INTO pr_history (pr_id, action_type, actor, description, created_at)
+                    SELECT pr_id, 'refresh', refreshed_by, 'PR refreshed', refreshed_at
+                    FROM refresh_history
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM pr_history 
+                        WHERE pr_history.pr_id = refresh_history.pr_id 
+                        AND pr_history.created_at = refresh_history.refreshed_at
+                    )
+                ''')
+                await migrate_data.run()
+                print("Migration from refresh_history completed")
+        except Exception as migration_error:
+            print(f"Note: Migration from refresh_history: {str(migration_error)}")
         
     except Exception as e:
         # Log the error but don't crash - schema may already exist
@@ -356,6 +413,20 @@ async def handle_add_pr(request, env):
         
         await stmt.run()
         
+        # Get the PR ID for history recording
+        get_id_stmt = db.prepare('SELECT id FROM prs WHERE pr_url = ?').bind(pr_url)
+        id_result = await get_id_stmt.first()
+        if id_result:
+            pr_id = id_result.to_py()['id']
+            # Record in history that this PR was added
+            await record_pr_history(
+                db, 
+                pr_id, 
+                'added', 
+                None,  # No specific actor for adding
+                f"PR #{parsed['pr_number']} added to tracker"
+            )
+        
         return Response.new(json.dumps({'success': True, 'data': pr_data}), 
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
@@ -427,9 +498,9 @@ async def handle_refresh_pr(request, env):
             return Response.new(json.dumps({'error': 'PR ID is required'}), 
                               {'status': 400, 'headers': {'Content-Type': 'application/json'}})
         
-        # Get PR URL from database
+        # Get PR data from database (current state before refresh)
         db = get_db(env)
-        stmt = db.prepare('SELECT pr_url, repo_owner, repo_name, pr_number FROM prs WHERE id = ?').bind(pr_id)
+        stmt = db.prepare('SELECT * FROM prs WHERE id = ?').bind(pr_id)
         result = await stmt.first()
         
         if not result:
@@ -437,10 +508,10 @@ async def handle_refresh_pr(request, env):
                               {'status': 404, 'headers': {'Content-Type': 'application/json'}})
         
         # Convert JsProxy to Python dict to make it subscriptable
-        result = result.to_py()
+        old_pr = result.to_py()
         
         # Fetch fresh data from GitHub
-        pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'])
+        pr_data = await fetch_pr_data(old_pr['repo_owner'], old_pr['repo_name'], old_pr['pr_number'])
         if not pr_data:
             return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
                               {'status': 500, 'headers': {'Content-Type': 'application/json'}})
@@ -449,8 +520,57 @@ async def handle_refresh_pr(request, env):
         # Using ISO-8601 format with 'Z' suffix for cross-browser compatibility
         current_timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         
+        # Detect changes and prepare history entries
+        changes = []
+        
+        # State changes
+        if old_pr.get('state') != pr_data['state']:
+            changes.append({
+                'type': 'state_change',
+                'description': f"State changed from {old_pr.get('state', 'unknown')} to {pr_data['state']}",
+                'before': json.dumps({'state': old_pr.get('state')}),
+                'after': json.dumps({'state': pr_data['state']})
+            })
+        
+        # Merged status changes
+        if old_pr.get('is_merged') != pr_data['is_merged']:
+            changes.append({
+                'type': 'state_change',
+                'description': 'PR was merged' if pr_data['is_merged'] else 'PR merge status changed',
+                'before': json.dumps({'is_merged': old_pr.get('is_merged')}),
+                'after': json.dumps({'is_merged': pr_data['is_merged']})
+            })
+        
+        # Review status changes
+        if old_pr.get('review_status') != pr_data['review_status']:
+            changes.append({
+                'type': 'review_change',
+                'description': f"Review status changed to {pr_data['review_status']}",
+                'before': json.dumps({'review_status': old_pr.get('review_status')}),
+                'after': json.dumps({'review_status': pr_data['review_status']})
+            })
+        
+        # Check status changes
+        if (old_pr.get('checks_passed') != pr_data['checks_passed'] or 
+            old_pr.get('checks_failed') != pr_data['checks_failed'] or 
+            old_pr.get('checks_skipped') != pr_data['checks_skipped']):
+            changes.append({
+                'type': 'checks_change',
+                'description': f"Checks: {pr_data['checks_passed']} passed, {pr_data['checks_failed']} failed, {pr_data['checks_skipped']} skipped",
+                'before': json.dumps({
+                    'checks_passed': old_pr.get('checks_passed'),
+                    'checks_failed': old_pr.get('checks_failed'),
+                    'checks_skipped': old_pr.get('checks_skipped')
+                }),
+                'after': json.dumps({
+                    'checks_passed': pr_data['checks_passed'],
+                    'checks_failed': pr_data['checks_failed'],
+                    'checks_skipped': pr_data['checks_skipped']
+                })
+            })
+        
         # Update database
-        stmt = db.prepare('''
+        update_stmt = db.prepare('''
             UPDATE prs SET
                 title = ?, state = ?, is_merged = ?, mergeable_state = ?,
                 files_changed = ?, checks_passed = ?, checks_failed = ?,
@@ -474,17 +594,31 @@ async def handle_refresh_pr(request, env):
             pr_id
         )
         
-        await stmt.run()
+        await update_stmt.run()
         
-        # Record refresh history
-        history_stmt = db.prepare('''
-            INSERT INTO refresh_history (pr_id, refreshed_by, refreshed_at)
-            VALUES (?, ?, ?)
-        ''').bind(pr_id, github_username, current_timestamp)
-        await history_stmt.run()
+        # Record refresh action in history
+        await record_pr_history(
+            db,
+            pr_id,
+            'refresh',
+            github_username,
+            f"PR refreshed by {github_username}"
+        )
         
-        # Get refresh count
-        count_stmt = db.prepare('SELECT COUNT(*) as count FROM refresh_history WHERE pr_id = ?').bind(pr_id)
+        # Record any detected changes
+        for change in changes:
+            await record_pr_history(
+                db,
+                pr_id,
+                change['type'],
+                None,  # Changes are system-detected, not user-initiated
+                change['description'],
+                change.get('before'),
+                change.get('after')
+            )
+        
+        # Get refresh count (count 'refresh' action types)
+        count_stmt = db.prepare("SELECT COUNT(*) as count FROM pr_history WHERE pr_id = ? AND action_type = 'refresh'").bind(pr_id)
         count_result = await count_stmt.first()
         refresh_count = count_result.to_py()['count'] if count_result else 0
         
@@ -492,7 +626,8 @@ async def handle_refresh_pr(request, env):
             'success': True, 
             'data': pr_data,
             'refresh_count': refresh_count,
-            'refreshed_by': github_username
+            'refreshed_by': github_username,
+            'changes_detected': len(changes)
         }), 
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
@@ -594,29 +729,29 @@ async def handle_status(env):
         }), 
                           {'headers': {'Content-Type': 'application/json'}})
 
-async def handle_get_refresh_history(env, pr_id):
-    """Get refresh history for a specific PR"""
+async def handle_get_pr_history(env, pr_id):
+    """Get full history for a specific PR"""
     try:
         db = get_db(env)
         
-        # Get refresh history
+        # Get full history from pr_history table
         stmt = db.prepare('''
-            SELECT refreshed_by, refreshed_at
-            FROM refresh_history
+            SELECT action_type, actor, description, before_state, after_state, created_at
+            FROM pr_history
             WHERE pr_id = ?
-            ORDER BY refreshed_at DESC
+            ORDER BY created_at DESC
         ''').bind(pr_id)
         
         result = await stmt.all()
         history = result.results.to_py() if hasattr(result, 'results') else []
         
-        # Get refresh count
-        count_stmt = db.prepare('SELECT COUNT(*) as count FROM refresh_history WHERE pr_id = ?').bind(pr_id)
+        # Get refresh count (count only 'refresh' actions)
+        count_stmt = db.prepare("SELECT COUNT(*) as count FROM pr_history WHERE pr_id = ? AND action_type = 'refresh'").bind(pr_id)
         count_result = await count_stmt.first()
         refresh_count = count_result.to_py()['count'] if count_result else 0
         
-        # Get unique user count
-        unique_stmt = db.prepare('SELECT COUNT(DISTINCT refreshed_by) as count FROM refresh_history WHERE pr_id = ?').bind(pr_id)
+        # Get unique user count (count distinct actors for refresh actions)
+        unique_stmt = db.prepare("SELECT COUNT(DISTINCT actor) as count FROM pr_history WHERE pr_id = ? AND action_type = 'refresh' AND actor IS NOT NULL").bind(pr_id)
         unique_result = await unique_stmt.first()
         unique_users = unique_result.to_py()['count'] if unique_result else 0
         
@@ -707,12 +842,26 @@ async def on_fetch(request, env):
             response.headers.set(key, value)
         return response
     
-    if path.startswith('/api/refresh-history/') and request.method == 'GET':
-        # Extract PR ID from path like /api/refresh-history/123
+    if path.startswith('/api/pr-history/') and request.method == 'GET':
+        # Extract PR ID from path like /api/pr-history/123
         pr_id = path.split('/')[-1]
         try:
             pr_id = int(pr_id)
-            response = await handle_get_refresh_history(env, pr_id)
+            response = await handle_get_pr_history(env, pr_id)
+            for key, value in cors_headers.items():
+                response.headers.set(key, value)
+            return response
+        except ValueError:
+            return Response.new(json.dumps({'error': 'Invalid PR ID'}), 
+                              {'status': 400, 'headers': {**cors_headers, 'Content-Type': 'application/json'}})
+    
+    # Legacy endpoint for backward compatibility
+    if path.startswith('/api/refresh-history/') and request.method == 'GET':
+        # Redirect to new endpoint
+        pr_id = path.split('/')[-1]
+        try:
+            pr_id = int(pr_id)
+            response = await handle_get_pr_history(env, pr_id)
             for key, value in cors_headers.items():
                 response.headers.set(key, value)
             return response
