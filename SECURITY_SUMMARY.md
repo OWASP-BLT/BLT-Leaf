@@ -2,13 +2,37 @@
 
 ## CodeQL Security Scan Results
 
-**Date**: 2024-02-11
+**Date**: 2024-02-15
 **Status**: ✅ PASSED - No vulnerabilities detected
 
-### Scan Results
+### Latest Scan Results
 - **Language**: Python
 - **Alerts Found**: 0
 - **Severity**: N/A
+- **Scan Date**: After implementing full history tracking
+
+## Recent Changes
+
+### History Tracking Enhancement
+The system has been expanded from simple refresh tracking to comprehensive activity monitoring:
+
+1. **Database Changes**:
+   - Renamed `refresh_history` to `pr_history` table
+   - Added action types: refresh, added, state_change, review_change, checks_change
+   - Added before/after state tracking for audit trails
+   - Automatic migration from old schema
+
+2. **Security Considerations**:
+   - ✅ All database operations use parameterized queries
+   - ✅ Input validation maintained
+   - ✅ Actor attribution for audit trail
+   - ✅ JSON state snapshots for change verification
+   - ✅ No sensitive data exposure
+
+3. **Access Control**:
+   - History viewing: No authentication required (read-only)
+   - Refresh operations: Authentication required (write)
+   - Change detection: Automatic, attributed to refresh actor
 
 ## Security Analysis
 
