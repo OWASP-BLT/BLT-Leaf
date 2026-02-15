@@ -2,44 +2,70 @@
 
 ## How the Timeline Appears
 
-### Collapsed State (Default)
+### Layout Structure (3-Column Design)
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ PR Card                                                          │
-│                                                                  │
-│ Refreshed 8 times by 3 users    [▸ History] [Refresh] (5m ago) │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────┬──────────────────────────────────┬────────────────┐
+│                │                                   │                │
+│  Repositories  │         PR Cards                  │    Activity    │
+│   (Sidebar)    │        (Main Area)                │    Timeline    │
+│                │                                   │   (Right Panel)│
+│   288px        │      Flexible Width               │     320px      │
+│                │                                   │                │
+└────────────────┴──────────────────────────────────┴────────────────┘
 ```
 
-### Expanded State (After clicking History button)
+### Right Panel - Default State
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ PR Card                                                          │
-│                                                                  │
-│ Refreshed 8 times by 3 users    [▾ History] [Refresh] (5m ago) │
-├─────────────────────────────────────────────────────────────────┤
-│ ACTIVITY TIMELINE                                                │
-│ ┌───────────────────────────────────────────────────────────┐   │
-│ │ 🔄  PR refreshed by alice                                  │   │
-│ │     by alice · 5 minutes ago                              │   │
-│ │                                                            │   │
-│ │ 📝  Review status changed to approved                      │   │
-│ │     1 hour ago                                             │   │
-│ │                                                            │   │
-│ │ ⚙️  Checks: 5 passed, 0 failed, 0 skipped                  │   │
-│ │     2 hours ago                                            │   │
-│ │                                                            │   │
-│ │ 🔄  PR refreshed by bob                                    │   │
-│ │     by bob · 3 hours ago                                   │   │
-│ │                                                            │   │
-│ │ 👁  Review status changed to pending                       │   │
-│ │     5 hours ago                                            │   │
-│ │                                                            │   │
-│ │ ➕  PR #42 added to tracker                                │   │
-│ │     2 days ago                                             │   │
-│ └───────────────────────────────────────────────────────────┘   │
-│                    (Scrollable if > 10 entries)                  │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────┐
+│  ACTIVITY TIMELINE                 │
+├────────────────────────────────────┤
+│                                    │
+│    Hover over a PR to see its      │
+│           history                  │
+│                                    │
+└────────────────────────────────────┘
+```
+
+### Right Panel - When Hovering a PR
+```
+┌────────────────────────────────────┐
+│  ACTIVITY TIMELINE                 │
+├────────────────────────────────────┤
+│  Total Activity                    │
+│  12 events                         │
+│  8 refreshes by 3 users            │
+├────────────────────────────────────┤
+│                                    │
+│  🔄  PR refreshed by alice         │
+│      by alice · 5 minutes ago      │
+│                                    │
+│  📝  Review status changed         │
+│      by alice · 1 hour ago         │
+│                                    │
+│  ⚙️  Checks: 5 passed              │
+│      by alice · 2 hours ago        │
+│                                    │
+│  🔄  PR refreshed by bob           │
+│      by bob · 3 hours ago          │
+│                                    │
+│  (scrollable for more events)      │
+│                                    │
+└────────────────────────────────────┘
+```
+
+### PR Card Hover Behavior
+```
+Normal State:
+┌─────────────────────────────────────┐
+│ PR Card                             │
+│ Border: gray                        │
+└─────────────────────────────────────┘
+
+Hovered State:
+┌─────────────────────────────────────┐
+│ PR Card                             │  → Timeline updates in right panel
+│ Border: highlighted                 │
+└─────────────────────────────────────┘
 ```
 
 ## Action Types and Icons
@@ -56,13 +82,56 @@
 
 ## Key Features
 
-1. **Compact Design**: Each entry is just 2-3 lines
-2. **Color-Coded Icons**: Different colors for different action types
-3. **Actor Attribution**: Shows who performed the action when applicable
-4. **Relative Timestamps**: "5 minutes ago" instead of absolute dates
-5. **Scrollable**: Max height with scroll for long histories
-6. **On-Demand Loading**: Timeline loads only when expanded
-7. **Toggle Behavior**: Click again to collapse
+1. **Dedicated Right Panel**: Timeline always visible in fixed position (on large screens)
+2. **Hover Interaction**: Timeline updates automatically when hovering over PR cards
+3. **No Click Required**: More intuitive than expand/collapse buttons
+4. **Summary Statistics**: Shows total events and refresh counts at top
+5. **Scrollable**: Full timeline without height limitations
+6. **Responsive**: Panel hidden on mobile/tablet (< 1024px), shown on desktop
+7. **Placeholder Text**: Clear instruction when no PR is hovered
+
+## Responsive Behavior
+
+- **Desktop (≥1024px)**: 3-column layout with timeline panel
+- **Tablet/Mobile (<1024px)**: 2-column or stacked layout, timeline panel hidden
+- **Breakpoint**: Uses Tailwind's `lg` breakpoint for responsiveness
+
+## User Experience Flow
+
+1. User loads the page → sees placeholder "Hover over a PR to see its history"
+2. User hovers over a PR card → timeline immediately loads and displays
+3. User hovers over different PR → timeline updates to show that PR's history
+4. User moves mouse away → timeline remains showing last hovered PR's history
+
+## Implementation Details
+
+### Frontend
+- Layout: Flexbox with 3 columns
+- Right panel: Fixed 320px width on large screens
+- Hover detection: `mouseenter` event on PR cards
+- Data fetching: `/api/pr-history/{pr_id}` endpoint
+- Rendering: `loadHistoryInPanel()` and `renderTimelineInPanel()` functions
+
+### Backend
+- `pr_history` table stores all actions
+- Automatic change detection during refresh
+- Tracks before/after state for changes
+- Migration from old `refresh_history` table
+
+## Advantages Over Previous Design
+
+**Before (Expandable inline timeline):**
+- Required clicking "History" button
+- Timeline appeared below PR card, pushing other content down
+- Each PR had its own timeline section
+- More vertical scrolling required
+
+**After (Right panel with hover):**
+- No clicking required, instant on hover
+- Timeline in dedicated space, doesn't affect layout
+- Single timeline panel for all PRs
+- Cleaner PR card design without extra buttons
+- Better use of horizontal screen space
 
 ## Example Timeline Data
 

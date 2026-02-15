@@ -10,13 +10,13 @@ PR refresh functionality now requires users to authenticate with their GitHub us
 - All state changes (merged status, review status, checks)
 - Total activity count
 
-## New Feature: Activity Timeline
+## New Feature: Activity Timeline in Right Panel
 
-Each PR now has an expandable timeline view that shows all activity and changes:
-- Click the **"History"** button on any PR card to expand/collapse the timeline
-- View a compact, scrollable list of all actions
-- See who performed each action and when
-- Track automatic state changes detected during refreshes
+Each PR's activity history is displayed in a dedicated right-hand column:
+- **Hover interaction**: Timeline updates automatically when hovering over PR cards
+- **Always visible**: Dedicated panel (320px) on large screens
+- **Summary statistics**: Shows total events and refresh counts
+- **Placeholder**: Displays "Hover over a PR to see its history" when no PR is active
 
 ### Timeline Action Types
 
@@ -29,25 +29,39 @@ The timeline displays different types of events with distinct icons:
 
 ### Timeline Display
 
+The timeline appears in a dedicated right-hand column and updates on hover:
+
+**When hovering a PR:**
 ```
-▾ History                                     [Refresh] (last refreshed 5 min ago)
-──────────────────────────────────────────────────────────────────────────────
 ACTIVITY TIMELINE
+─────────────────
+Total Activity
+12 events
+8 refreshes by 3 users
+─────────────────
 
 🔄  PR refreshed by alice
     by alice · 5 minutes ago
 
 📝  Review status changed to approved
-    1 hour ago
+    by alice · 1 hour ago
 
-✓  Checks: 5 passed, 0 failed, 0 skipped
-    2 hours ago
+⚙️  Checks: 5 passed, 0 failed, 0 skipped
+    by alice · 2 hours ago
 
 🔄  PR refreshed by bob
     by bob · 3 hours ago
 
 ➕  PR #42 added to tracker
     2 days ago
+```
+
+**When not hovering:**
+```
+ACTIVITY TIMELINE
+─────────────────
+
+Hover over a PR to see its history
 ```
 
 ## How It Works
@@ -187,11 +201,14 @@ Still supported for backward compatibility. Redirects to `/api/pr-history/{pr_id
 3. **Refresh Count**: Each PR card displays:
    - "Never refreshed" if refresh_count is 0
    - "Refreshed X time(s) by Y users" otherwise
-4. **History Timeline**: Expandable timeline showing all PR activity
-   - Click "History" button to expand/collapse
+4. **Right-Hand Timeline Panel**: Dedicated column showing PR activity history
+   - Visible on large screens (≥1024px)
+   - Updates automatically on hover over PR cards
+   - Shows placeholder "Hover over a PR to see its history" when no PR is hovered
+   - Displays summary statistics (total events, refresh counts)
    - Shows icons for different action types
    - Displays actors and relative timestamps
-   - Scrollable for long histories
+   - Fully scrollable for long histories
 5. **Success Notification**: Shows refresh count and changes detected after successful refresh
 
 ## Security Considerations
