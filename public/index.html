@@ -61,7 +61,7 @@
                     <span id="usernameDisplay" class="hidden text-sm text-slate-600 dark:text-slate-400"></span>
                     <button id="loginBtn" onclick="login()"
                         class="rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700 transition-colors shadow-sm">
-                        <i class="fas fa-sign-in-alt mr-1"></i>Login
+                        <i class="fab fa-github mr-1"></i>Login with GitHub
                     </button>
                     <button id="logoutBtn" onclick="logout()"
                         class="hidden rounded-lg bg-slate-600 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition-colors shadow-sm">
@@ -78,6 +78,19 @@
             </div>
         </div>
     </header>
+
+    <!-- Security Warning Banner (shown if encryption key not configured) -->
+    <div id="securityWarning" class="hidden bg-yellow-50 border-b border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800">
+        <div class="mx-auto max-w-7xl px-4 py-3 sm:px-6">
+            <div class="flex items-center gap-3">
+                <i class="fas fa-exclamation-triangle text-yellow-600 dark:text-yellow-500"></i>
+                <p class="text-sm text-yellow-800 dark:text-yellow-300">
+                    <strong>Security Warning:</strong> ENCRYPTION_KEY not configured. GitHub tokens are encrypted with a default key. 
+                    Please configure ENCRYPTION_KEY in your Cloudflare Worker environment for production use.
+                </p>
+            </div>
+        </div>
+    </div>
 
     <div class="bg-gradient-to-r from-red-50 to-orange-50 border-b border-red-100">
         <div class="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-5">
@@ -204,18 +217,37 @@
             return localStorage.getItem('github_username');
         }
 
-        function setUsername(username) {
+        function getEncryptedToken() {
+            return localStorage.getItem('github_encrypted_token');
+        }
+
+        function setUserData(username, encryptedToken, avatarUrl) {
             localStorage.setItem('github_username', username);
+            localStorage.setItem('github_encrypted_token', encryptedToken);
+            if (avatarUrl) {
+                localStorage.setItem('github_avatar', avatarUrl);
+            }
         }
 
-        function clearUsername() {
+        function clearUserData() {
             localStorage.removeItem('github_username');
+            localStorage.removeItem('github_encrypted_token');
+            localStorage.removeItem('github_avatar');
         }
 
-        function validateUsername(username) {
-            // GitHub username rules: 1-39 chars, alphanumeric + hyphens, no leading/trailing/consecutive hyphens
-            if (!username || username.length > 39) return false;
-            return /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/.test(username);
+        function getAvatarUrl() {
+            return localStorage.getItem('github_avatar');
+        }
+
+        async function checkConfig() {
+            try {
+                const response = await fetch('/api/auth/check-config');
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error('Failed to check config:', error);
+                return { encryption_key_configured: false, github_oauth_configured: false };
+            }
         }
 
         function updateAuthUI() {
@@ -224,11 +256,18 @@
             const loginBtn = document.getElementById('loginBtn');
             const logoutBtn = document.getElementById('logoutBtn');
             const usernameDisplay = document.getElementById('usernameDisplay');
+            const avatarUrl = getAvatarUrl();
 
             if (username) {
                 loginBtn.classList.add('hidden');
                 logoutBtn.classList.remove('hidden');
-                usernameDisplay.textContent = username;
+                
+                // Show avatar if available
+                if (avatarUrl) {
+                    usernameDisplay.innerHTML = `<img src="${avatarUrl}" class="w-6 h-6 rounded-full inline mr-2" alt="Avatar">${escapeHtml(username)}`;
+                } else {
+                    usernameDisplay.textContent = username;
+                }
                 usernameDisplay.classList.remove('hidden');
             } else {
                 loginBtn.classList.remove('hidden');
@@ -238,22 +277,62 @@
         }
 
         function login() {
-            const username = prompt('Enter your GitHub username:');
-            if (!username) return;
+            // Get GitHub OAuth client ID from environment (set in worker)
+            // For now, we'll redirect to a GitHub OAuth URL
+            // The backend will need GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET configured
+            
+            const clientId = 'Ov23liSuK7XEEz9gYSEq'; // This should be configured
+            const redirectUri = `${window.location.origin}/api/auth/github/callback`;
+            const scope = 'repo read:user';
+            
+            // Save current page to return after OAuth
+            localStorage.setItem('pre_oauth_path', window.location.pathname);
+            
+            // Redirect to GitHub OAuth
+            window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
+        }
 
-            if (!validateUsername(username)) {
-                showError('Invalid GitHub username. Must be 1-39 characters, alphanumeric + hyphens only.');
-                return;
+        async function handleOAuthCallback() {
+            // Check if we're on the OAuth callback
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            
+            if (!code) return false;
+            
+            try {
+                // Exchange code for token via our backend
+                const response = await fetch(`/api/auth/github/callback?code=${code}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(`OAuth failed: ${data.error}`);
+                    return true;
+                }
+                
+                if (data.success) {
+                    // Store user data
+                    setUserData(data.username, data.encrypted_token, data.avatar_url);
+                    updateAuthUI();
+                    showSuccess(`Logged in as ${data.username}`);
+                    
+                    // Redirect back to original page
+                    const returnPath = localStorage.getItem('pre_oauth_path') || '/';
+                    localStorage.removeItem('pre_oauth_path');
+                    window.history.replaceState({}, document.title, returnPath);
+                    
+                    return true;
+                }
+            } catch (error) {
+                console.error('OAuth callback error:', error);
+                showError('Failed to complete GitHub login');
             }
-
-            setUsername(username);
-            updateAuthUI();
-            showSuccess(`Logged in as ${username}`);
+            
+            return false;
         }
 
         function logout() {
             if (confirm('Are you sure you want to log out?')) {
-                clearUsername();
+                clearUserData();
                 updateAuthUI();
                 showSuccess('Logged out successfully');
             }
@@ -870,8 +949,10 @@
         async function updatePr(prId, button) {
             // Check authentication first
             const username = getUsername();
-            if (!username) {
-                showError('Please log in to refresh PRs');
+            const encryptedToken = getEncryptedToken();
+            
+            if (!username || !encryptedToken) {
+                showError('Please log in with GitHub to refresh PRs');
                 return;
             }
 
@@ -882,12 +963,12 @@
             button.classList.add('opacity-70', 'cursor-not-allowed');
 
             try {
-                // Step 1: Refresh PR data from GitHub
+                // Step 1: Refresh PR data from GitHub using encrypted token
                 const refreshResponse = await fetch('/api/refresh', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': username
+                        'Authorization': `Bearer ${encryptedToken}`
                     },
                     body: JSON.stringify({ pr_id: prId })
                 });
@@ -1155,11 +1236,32 @@
         // Make sortPrs globally accessible for onclick handlers
         window.sortPrs = sortPrs;
 
-        initTheme();
-        updateAuthUI();  // Initialize authentication UI
-        loadRateLimit();
-        loadRepos();
-        loadPrs();
+        // Initialize app
+        async function initApp() {
+            initTheme();
+            
+            // Check if we're returning from OAuth
+            const oauthHandled = await handleOAuthCallback();
+            
+            // Update auth UI
+            updateAuthUI();
+            
+            // Check configuration and show warning if needed
+            const config = await checkConfig();
+            const warningBanner = document.getElementById('securityWarning');
+            if (!config.encryption_key_configured && warningBanner) {
+                warningBanner.classList.remove('hidden');
+            }
+            
+            // Load data
+            if (!oauthHandled) {
+                loadRateLimit();
+                loadRepos();
+                loadPrs();
+            }
+        }
+        
+        initApp();
         setInterval(loadRateLimit, 600000);
     </script>
 </body>

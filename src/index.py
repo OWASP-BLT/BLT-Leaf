@@ -191,6 +191,141 @@ async def get_github_username_from_token(token):
         print(f"Failed to get GitHub username: {str(e)}")
         return None
 
+async def store_user_token(db, github_username, github_user_id, github_token, avatar_url, encryption_key):
+    """
+    Store or update user's GitHub token in database.
+    
+    Args:
+        db: Database connection
+        github_username: GitHub username
+        github_user_id: GitHub user ID
+        github_token: GitHub access token (will be encrypted)
+        avatar_url: User's GitHub avatar URL
+        encryption_key: Encryption key for token
+    """
+    try:
+        encrypted = encrypt_token(github_token, encryption_key)
+        current_timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        
+        stmt = db.prepare('''
+            INSERT INTO users (github_username, github_user_id, encrypted_token, avatar_url, last_login_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(github_username) DO UPDATE SET
+                encrypted_token = excluded.encrypted_token,
+                avatar_url = excluded.avatar_url,
+                last_login_at = excluded.last_login_at
+        ''').bind(github_username, github_user_id, encrypted, avatar_url, current_timestamp)
+        await stmt.run()
+    except Exception as e:
+        print(f"Error storing user token: {str(e)}")
+        raise
+
+async def get_user_token(db, github_username, encryption_key):
+    """
+    Retrieve and decrypt user's GitHub token from database.
+    
+    Args:
+        db: Database connection
+        github_username: GitHub username
+        encryption_key: Encryption key for token
+        
+    Returns:
+        Decrypted GitHub token or None
+    """
+    try:
+        stmt = db.prepare('SELECT encrypted_token FROM users WHERE github_username = ?').bind(github_username)
+        result = await stmt.first()
+        
+        if not result:
+            return None
+        
+        result_dict = result.to_py()
+        encrypted = result_dict.get('encrypted_token')
+        
+        if not encrypted:
+            return None
+        
+        return decrypt_token(encrypted, encryption_key)
+    except Exception as e:
+        print(f"Error retrieving user token: {str(e)}")
+        return None
+
+async def exchange_oauth_code_for_token(code, client_id, client_secret):
+    """
+    Exchange OAuth code for GitHub access token.
+    
+    Args:
+        code: OAuth authorization code from GitHub
+        client_id: GitHub OAuth app client ID
+        client_secret: GitHub OAuth app client secret
+        
+    Returns:
+        Access token or None
+    """
+    try:
+        url = 'https://github.com/login/oauth/access_token'
+        
+        body = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'code': code
+        }
+        
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+        
+        options = to_js({
+            "method": "POST",
+            "headers": headers,
+            "body": json.dumps(body)
+        }, dict_converter=Object.fromEntries)
+        
+        response = await fetch(url, options)
+        
+        if response.status != 200:
+            return None
+        
+        data = (await response.json()).to_py()
+        return data.get('access_token')
+    except Exception as e:
+        print(f"Failed to exchange OAuth code: {str(e)}")
+        return None
+
+async def get_github_user_info(token):
+    """
+    Get GitHub user information using access token.
+    
+    Args:
+        token: GitHub access token
+        
+    Returns:
+        Dict with user info or None
+    """
+    try:
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'BLT-Leaf/1.0'
+        }
+        
+        options = to_js({
+            "method": "GET",
+            "headers": headers
+        }, dict_converter=Object.fromEntries)
+        
+        response = await fetch('https://api.github.com/user', options)
+        
+        if response.status != 200:
+            return None
+        
+        return (await response.json()).to_py()
+    except Exception as e:
+        print(f"Failed to get GitHub user info: {str(e)}")
+        return None
+
 def extract_and_validate_username(request):
     """
     Extract and validate username from Authorization header.
@@ -804,6 +939,20 @@ async def init_database_schema(env):
         ''')
         await create_history_table.run()
         
+        # Create users table for OAuth tokens
+        create_users_table = db.prepare('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                github_username TEXT NOT NULL UNIQUE,
+                github_user_id INTEGER NOT NULL UNIQUE,
+                encrypted_token TEXT NOT NULL,
+                avatar_url TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_login_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await create_users_table.run()
+        
         # Migration: Add columns if they don't exist
         # Check if columns exist by querying PRAGMA table_info
         try:
@@ -865,6 +1014,13 @@ async def init_database_schema(env):
         
         index5 = db.prepare('CREATE INDEX IF NOT EXISTS idx_pr_history_action_type ON pr_history(action_type)')
         await index5.run()
+        
+        # Create indexes for users table
+        index6 = db.prepare('CREATE INDEX IF NOT EXISTS idx_users_github_username ON users(github_username)')
+        await index6.run()
+        
+        index7 = db.prepare('CREATE INDEX IF NOT EXISTS idx_users_github_user_id ON users(github_user_id)')
+        await index7.run()
         
     except Exception as e:
         # Log the error but don't crash - schema may already exist
@@ -1777,16 +1933,30 @@ async def handle_list_repos(env):
 async def handle_refresh_pr(request, env):
     """Refresh a specific PR's data (requires authentication)"""
     try:
-        # Verify authentication
-        username = extract_and_validate_username(request)
-        if not username:
+        # Extract and validate token
+        github_token, legacy_username = extract_and_validate_token(request, env)
+        
+        # Handle new token-based auth
+        if github_token:
+            # Get username from token
+            username = await get_github_username_from_token(github_token)
+            if not username:
+                return Response.new(json.dumps({
+                    'error': 'Invalid or expired GitHub token. Please log in again.'
+                }), {'status': 401, 'headers': {'Content-Type': 'application/json'}})
+            user_token = github_token
+        # Handle legacy username-only auth (backward compatibility)
+        elif legacy_username:
+            username = legacy_username
+            user_token = None
+        # No auth provided
+        else:
             return Response.new(json.dumps({
                 'error': 'Authentication required. Please log in with GitHub to refresh PRs.'
             }), {'status': 401, 'headers': {'Content-Type': 'application/json'}})
         
         data = (await request.json()).to_py()
         pr_id = data.get('pr_id')
-        user_token = request.headers.get('x-github-token')
         
         if not pr_id:
             return Response.new(json.dumps({'error': 'PR ID is required'}), 
@@ -1808,7 +1978,7 @@ async def handle_refresh_pr(request, env):
         # Convert JsProxy to Python dict to make it subscriptable
         old_state = result.to_py()
         
-        # Fetch fresh data from GitHub (with Token)
+        # Fetch fresh data from GitHub (with authenticated token if available)
         pr_data = await fetch_pr_data(old_state['repo_owner'], old_state['repo_name'], old_state['pr_number'], user_token)
         if not pr_data:
             return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
@@ -2353,6 +2523,64 @@ async def handle_pr_readiness(request, env, path):
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
+
+async def handle_oauth_callback(request, env, url):
+    """Handle GitHub OAuth callback"""
+    try:
+        # Get OAuth code from query params
+        code = url.searchParams.get('code')
+        if not code:
+            return Response.new(json.dumps({'error': 'No authorization code provided'}),
+                              {'status': 400, 'headers': {'Content-Type': 'application/json'}})
+        
+        # Get OAuth app credentials from environment
+        client_id = getattr(env, 'GITHUB_CLIENT_ID', None)
+        client_secret = getattr(env, 'GITHUB_CLIENT_SECRET', None)
+        
+        if not client_id or not client_secret:
+            return Response.new(json.dumps({'error': 'GitHub OAuth not configured'}),
+                              {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+        
+        # Exchange code for access token
+        access_token = await exchange_oauth_code_for_token(code, client_id, client_secret)
+        if not access_token:
+            return Response.new(json.dumps({'error': 'Failed to exchange OAuth code'}),
+                              {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+        
+        # Get user info from GitHub
+        user_info = await get_github_user_info(access_token)
+        if not user_info:
+            return Response.new(json.dumps({'error': 'Failed to get user info'}),
+                              {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+        
+        # Store encrypted token in database
+        db = get_db(env)
+        encryption_key = get_encryption_key(env)
+        
+        await store_user_token(
+            db,
+            user_info['login'],
+            user_info['id'],
+            access_token,
+            user_info.get('avatar_url'),
+            encryption_key
+        )
+        
+        # Encrypt token for client storage
+        encrypted_token = encrypt_token(access_token, encryption_key)
+        
+        # Return user data and encrypted token
+        return Response.new(json.dumps({
+            'success': True,
+            'username': user_info['login'],
+            'avatar_url': user_info.get('avatar_url'),
+            'encrypted_token': encrypted_token
+        }), {'headers': {'Content-Type': 'application/json'}})
+        
+    except Exception as e:
+        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+
 async def on_fetch(request, env):
     """Main request handler"""
     url = URL.new(request.url)
@@ -2392,7 +2620,24 @@ async def on_fetch(request, env):
     # API endpoints
     response = None
     
-    if path == '/api/prs':
+    # OAuth callback endpoint
+    if path == '/api/auth/github/callback' and request.method == 'GET':
+        response = await handle_oauth_callback(request, env, url)
+        for key, value in cors_headers.items():
+            response.headers.set(key, value)
+        return response
+    # Check encryption key configuration
+    elif path == '/api/auth/check-config' and request.method == 'GET':
+        encryption_key = getattr(env, 'ENCRYPTION_KEY', None)
+        github_client_id = getattr(env, 'GITHUB_CLIENT_ID', None)
+        response = Response.new(json.dumps({
+            'encryption_key_configured': encryption_key is not None and encryption_key != _DEFAULT_ENCRYPTION_KEY,
+            'github_oauth_configured': github_client_id is not None
+        }), {'headers': {'Content-Type': 'application/json'}})
+        for key, value in cors_headers.items():
+            response.headers.set(key, value)
+        return response
+    elif path == '/api/prs':
         if request.method == 'GET':
             response = await handle_list_prs(env, url.searchParams.get('repo'))
         elif request.method == 'POST':

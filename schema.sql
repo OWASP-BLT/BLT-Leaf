@@ -62,6 +62,21 @@ CREATE INDEX IF NOT EXISTS idx_pr_history_pr_id ON pr_history(pr_id);
 CREATE INDEX IF NOT EXISTS idx_pr_history_actor ON pr_history(actor);
 CREATE INDEX IF NOT EXISTS idx_pr_history_action_type ON pr_history(action_type);
 
+-- Users table for storing GitHub OAuth tokens
+-- Stores encrypted tokens for authenticated users
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    github_username TEXT NOT NULL UNIQUE,
+    github_user_id INTEGER NOT NULL UNIQUE,
+    encrypted_token TEXT NOT NULL,
+    avatar_url TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_login_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_github_username ON users(github_username);
+CREATE INDEX IF NOT EXISTS idx_users_github_user_id ON users(github_user_id);
+
 -- Migration for existing databases (if needed manually)
 -- Run this if the automatic migration in init_database_schema fails:
 -- ALTER TABLE prs ADD COLUMN last_refreshed_at TEXT;
