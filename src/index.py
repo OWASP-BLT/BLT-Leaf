@@ -2326,6 +2326,10 @@ async def add_cache_headers(response, cache_control):
     """
     Helper function to add Cache-Control headers to a response.
     
+    Creates a new Response with the same body and headers as the original,
+    plus the Cache-Control header. This is necessary because Response headers
+    are immutable in Cloudflare Workers.
+    
     Args:
         response: Original Response object
         cache_control: Cache-Control header value to set
@@ -2338,6 +2342,7 @@ async def add_cache_headers(response, cache_control):
     headers.set('Cache-Control', cache_control)
     
     # Create new response with the same body and updated headers
+    # Using arrayBuffer() to consume the body is required for cloning in Cloudflare Workers
     new_response = Response.new(
         await response.arrayBuffer(),
         {
