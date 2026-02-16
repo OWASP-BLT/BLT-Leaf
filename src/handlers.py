@@ -454,9 +454,6 @@ async def verify_github_signature(request, payload_body, secret):
     
     # GitHub sends signature as "sha256=<hash>"
     try:
-        import hashlib
-        import hmac
-        
         # Ensure payload_body is bytes
         if isinstance(payload_body, str):
             payload_body = payload_body.encode('utf-8')

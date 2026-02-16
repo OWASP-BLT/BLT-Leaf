@@ -284,7 +284,6 @@ def get_readiness_cache_ttl():
 def set_rate_limit_cache(data):
     """Set rate limit cache data with current timestamp"""
     global _rate_limit_cache
-    from js import Date
     
     current_time = Date.now() / 1000  # Convert milliseconds to seconds
     _rate_limit_cache['data'] = data
