@@ -37,16 +37,18 @@ _READINESS_CACHE_TTL = 600
 # In-memory cache for timeline data
 # Reduces redundant API calls across timeline/review-analysis/readiness endpoints
 _timeline_cache = {
-    # Structure: {cache_key: {'data': dict, 'timestamp': float}}
+    # Structure: {cache_key: {'data': dict, 'timestamp': float, 'cached_at': str}}
     # cache_key format: "{owner}/{repo}/{pr_number}"
 }
 # Cache TTL in seconds (30 minutes - timeline data changes less frequently)
 _TIMELINE_CACHE_TTL = 1800
+# Max stale cache age (24 hours) - used as fallback when rate limited
+_MAX_STALE_CACHE_AGE = 86400
 
 # In-memory cache for PR data (per worker isolate)
 # Reduces redundant GitHub API calls when fetching PR details
 _pr_data_cache = {
-    # Structure: {cache_key: {'data': dict, 'timestamp': float}}
+    # Structure: {cache_key: {'data': dict, 'timestamp': float, 'cached_at': str}}
     # cache_key format: "pr:{owner}/{repo}/{pr_number}"
 }
 # Cache TTL in seconds (5 minutes - balance freshness vs API usage)
@@ -129,6 +131,39 @@ def check_rate_limit(ip_address):
     retry_after = int(_READINESS_RATE_WINDOW - window_elapsed) + 1
     print(f"Rate limit: EXCEEDED for {ip_address} - retry after {retry_after}s")
     return (False, retry_after)
+
+def is_rate_limited_response(status_code):
+    """Check if a response indicates rate limiting.
+    
+    Args:
+        status_code: HTTP status code
+        
+    Returns:
+        bool: True if rate limited, False otherwise
+    """
+    # GitHub uses 403 with specific headers for rate limiting, but also uses 429
+    return status_code in [403, 429]
+
+def format_cache_age(seconds):
+    """Format cache age in seconds to human-readable string.
+    
+    Args:
+        seconds: Age in seconds
+        
+    Returns:
+        String like "12 min ago" or "2 hours ago"
+    """
+    if seconds < 60:
+        return f"{int(seconds)} sec ago"
+    elif seconds < 3600:
+        minutes = int(seconds / 60)
+        return f"{minutes} min ago"
+    elif seconds < 86400:
+        hours = int(seconds / 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    else:
+        days = int(seconds / 86400)
+        return f"{days} day{'s' if days != 1 else ''} ago"
 
 async def get_readiness_cache(env, pr_id):
     """Get cached readiness result for a PR if still valid.
@@ -360,8 +395,8 @@ async def load_readiness_from_db(env, pr_id):
                 'ci_score_display': f"{ci_score}%",
                 'review_score': review_score,
                 'review_score_display': f"{review_score}%",
-                'classification': row.get('classification'),
-                'merge_ready': bool(row.get('merge_ready')),
+                'classification': pr.get('classification'),
+                'merge_ready': bool(pr.get('merge_ready')),
                 'blockers': blockers,
                 'warnings': warnings,
                 'recommendations': recommendations
@@ -722,6 +757,9 @@ async def fetch_pr_data(owner, repo, pr_number, token=None, force_refresh=False)
         pr_response = await fetch_with_headers(pr_url, headers, token)
         
         if pr_response.status != 200:
+            # Store status for better error reporting
+            if is_rate_limited_response(pr_response.status):
+                print(f"⚠️  GitHub rate limited when fetching PR {cache_key}")
             return None
             
         pr_data = (await pr_response.json()).to_py()
@@ -826,7 +864,9 @@ async def fetch_paginated_data(url, headers):
         headers: Headers object to use for requests
     
     Returns:
-        List of all items across all pages
+        Tuple of (data, rate_limited):
+            - data: List of all items across all pages, or None if rate limited
+            - rate_limited: Boolean indicating if request was rate limited
     """
     all_data = []
     current_url = url
@@ -834,6 +874,11 @@ async def fetch_paginated_data(url, headers):
     
     while current_url:
         response = await fetch(current_url, fetch_options)
+        
+        # Check for rate limiting
+        if is_rate_limited_response(response.status):
+            print(f"⚠️  GitHub API rate limited: status={response.status}")
+            return (None, True)
         
         if not response.ok:
             status = getattr(response, 'status', 'unknown')
@@ -860,26 +905,32 @@ async def fetch_paginated_data(url, headers):
                         current_url = url_match[1:-1]
                     break
     
-    return all_data
+    return (all_data, False)
 
 async def fetch_pr_timeline_data(owner, repo, pr_number, github_token=None):
     """
     Fetch all timeline data for a PR: commits, reviews, review comments, issue comments
     
     Uses in-memory caching (30 min TTL) to avoid redundant API calls across endpoints.
+    Falls back to stale cache (up to 24 hours old) when rate limited.
     
-    Returns dict with raw data from GitHub API:
-    {
-        'commits': [...],
-        'reviews': [...],
-        'review_comments': [...],
-        'issue_comments': [...]
-    }
+    Returns tuple of (timeline_data, metadata):
+        - timeline_data: Dict with commits, reviews, review_comments, issue_comments
+        - metadata: Dict with cache_status, cached_at (if applicable)
     """
-    # Check cache first
-    cached_data = get_timeline_cache(owner, repo, pr_number)
-    if cached_data:
-        return cached_data
+    global _timeline_cache
+    
+    cache_key = f"{owner}/{repo}/{pr_number}"
+    current_time = Date.now() / 1000
+    
+    # Check fresh cache first
+    if cache_key in _timeline_cache:
+        cached = _timeline_cache[cache_key]
+        age = current_time - cached['timestamp']
+        
+        if age < _TIMELINE_CACHE_TTL:
+            print(f"✅ Timeline Cache HIT (fresh) for {cache_key}")
+            return (cached['data'], {'cache_status': 'fresh', 'cached_at': cached.get('cached_at')})
     
     base_url = 'https://api.github.com'
     
@@ -902,13 +953,45 @@ async def fetch_pr_timeline_data(owner, repo, pr_number, github_token=None):
         issue_comments_url = f'{base_url}/repos/{owner}/{repo}/issues/{pr_number}/comments?per_page=100'
         
         # Make truly parallel requests using asyncio.gather
-        commits_data, reviews_data, review_comments_data, issue_comments_data = await asyncio.gather(
+        results = await asyncio.gather(
             fetch_paginated_data(commits_url, headers),
             fetch_paginated_data(reviews_url, headers),
             fetch_paginated_data(review_comments_url, headers),
             fetch_paginated_data(issue_comments_url, headers)
         )
         
+        # Unpack results (each is a tuple of (data, rate_limited))
+        (commits_data, commits_rate_limited) = results[0]
+        (reviews_data, reviews_rate_limited) = results[1]
+        (review_comments_data, comments_rate_limited) = results[2]
+        (issue_comments_data, issues_rate_limited) = results[3]
+        
+        # Check if any request was rate limited
+        if any([commits_rate_limited, reviews_rate_limited, comments_rate_limited, issues_rate_limited]):
+            print(f"⚠️  GitHub rate limited - checking for stale cache for {cache_key}")
+            
+            # Try to use stale cache (up to 24 hours old)
+            if cache_key in _timeline_cache:
+                cached = _timeline_cache[cache_key]
+                age = current_time - cached['timestamp']
+                
+                if age < _MAX_STALE_CACHE_AGE:
+                    cache_age_str = format_cache_age(age)
+                    print(f"📦 Using stale cache for {cache_key} (age: {cache_age_str})")
+                    return (cached['data'], {
+                        'cache_status': 'stale',
+                        'cached_at': cached.get('cached_at'),
+                        'cache_age': cache_age_str
+                    })
+            
+            # No stale cache available - return user-friendly error
+            raise Exception(
+                "Unable to fetch PR timeline data. GitHub API rate limit exceeded. "
+                "This PR hasn't been analyzed yet, so there's no cached data available. "
+                "Please try again in a few minutes when the rate limit resets."
+            )
+        
+        # Success - build timeline data
         timeline_data = {
             'commits': commits_data,
             'reviews': reviews_data,
@@ -916,12 +999,37 @@ async def fetch_pr_timeline_data(owner, repo, pr_number, github_token=None):
             'issue_comments': issue_comments_data
         }
         
-        # Cache the result for future requests
-        set_timeline_cache(owner, repo, pr_number, timeline_data)
+        # Cache the result with timestamp
+        cached_at = datetime.now(timezone.utc).isoformat()
+        _timeline_cache[cache_key] = {
+            'data': timeline_data,
+            'timestamp': current_time,
+            'cached_at': cached_at
+        }
+        print(f"💾 Cached timeline data for {cache_key}")
         
-        return timeline_data
+        return (timeline_data, {'cache_status': 'fresh'})
     except Exception as e:
-        raise Exception(f"Error fetching timeline data: {str(e)}")
+        # On any error, try to use stale cache as last resort
+        if cache_key in _timeline_cache:
+            cached = _timeline_cache[cache_key]
+            age = current_time - cached['timestamp']
+            
+            if age < _MAX_STALE_CACHE_AGE:
+                cache_age_str = format_cache_age(age)
+                print(f"⚠️  Error fetching timeline, using stale cache: {str(e)}")
+                return (cached['data'], {
+                    'cache_status': 'stale',
+                    'cached_at': cached.get('cached_at'),
+                    'cache_age': cache_age_str,
+                    'error': str(e)
+                })
+        
+        # No cache available at all
+        raise Exception(
+            f"Unable to load timeline data: {str(e)}. "
+            "This PR may not have been analyzed yet. Please try the 'Update' button when the rate limit resets."
+        )
 
 def parse_github_timestamp(timestamp_str):
     """Parse GitHub ISO 8601 timestamp to datetime object"""
@@ -1601,8 +1709,11 @@ async def handle_refresh_pr(request, env):
         # Fetch fresh data from GitHub (with Token) - force refresh to bypass cache
         pr_data = await fetch_pr_data(result['repo_owner'], result['repo_name'], result['pr_number'], user_token, force_refresh=True)
         if not pr_data:
-            return Response.new(json.dumps({'error': 'Failed to fetch PR data from GitHub'}), 
-                              {'status': 403, 'headers': {'Content-Type': 'application/json'}})
+            return Response.new(json.dumps({
+                'error': 'Unable to refresh PR data from GitHub. '
+                         'GitHub API may be rate limited or temporarily unavailable. '
+                         'Existing data in the table is still valid. Please try again in a few minutes.'
+            }), {'status': 503, 'headers': {'Content-Type': 'application/json'}})
         
         # Check if PR is now merged or closed - delete it from database
         if pr_data['is_merged'] or pr_data['state'] == 'closed':
@@ -1766,8 +1877,8 @@ async def handle_pr_timeline(request, env, path):
         
         pr = result.to_py()
         
-        # Fetch timeline data from GitHub
-        timeline_data = await fetch_pr_timeline_data(
+        # Fetch timeline data from GitHub (with rate limit handling)
+        timeline_data, cache_metadata = await fetch_pr_timeline_data(
             pr['repo_owner'],
             pr['repo_name'],
             pr['pr_number']
@@ -1783,7 +1894,7 @@ async def handle_pr_timeline(request, env, path):
             event_copy['timestamp'] = event['timestamp'].isoformat()
             timeline_json.append(event_copy)
         
-        return Response.new(json.dumps({
+        response_data = {
             'pr': {
                 'id': pr['id'],
                 'title': pr['title'],
@@ -1793,7 +1904,18 @@ async def handle_pr_timeline(request, env, path):
             },
             'timeline': timeline_json,
             'event_count': len(timeline_json)
-        }), 
+        }
+        
+        # Add cache metadata if data is from stale cache
+        if cache_metadata.get('cache_status') == 'stale':
+            response_data['_cache'] = {
+                'status': 'stale',
+                'age': cache_metadata.get('cache_age'),
+                'message': f"⚠️ GitHub rate-limited. Showing cached data from {cache_metadata.get('cache_age')}.",
+                'warning': 'Timeline may not reflect recent activity.'
+            }
+        
+        return Response.new(json.dumps(response_data), 
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
@@ -1851,8 +1973,8 @@ async def handle_pr_review_analysis(request, env, path):
         
         pr = result.to_py()
         
-        # Fetch timeline data from GitHub
-        timeline_data = await fetch_pr_timeline_data(
+        # Fetch timeline data from GitHub (with rate limit handling)
+        timeline_data, cache_metadata = await fetch_pr_timeline_data(
             pr['repo_owner'],
             pr['repo_name'],
             pr['pr_number']
@@ -1867,7 +1989,7 @@ async def handle_pr_review_analysis(request, env, path):
         # Classify review health
         classification, score = classify_review_health(review_data)
         
-        return Response.new(json.dumps({
+        response_data = {
             'pr': {
                 'id': pr['id'],
                 'title': pr['title'],
@@ -1892,7 +2014,18 @@ async def handle_pr_review_analysis(request, env, path):
                 'last_author_action': review_data['last_author_action']
             },
             'feedback_loops': review_data['feedback_loops']
-        }), 
+        }
+        
+        # Add cache metadata if data is from stale cache
+        if cache_metadata.get('cache_status') == 'stale':
+            response_data['_cache'] = {
+                'status': 'stale',
+                'age': cache_metadata.get('cache_age'),
+                'message': f"⚠️ GitHub rate-limited. Showing cached data from {cache_metadata.get('cache_age')}.",
+                'warning': 'Review analysis may not reflect recent activity.'
+            }
+        
+        return Response.new(json.dumps(response_data), 
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
@@ -1968,8 +2101,8 @@ async def handle_pr_readiness(request, env, path):
         
         pr = result.to_py()
         
-        # Fetch timeline data from GitHub
-        timeline_data = await fetch_pr_timeline_data(
+        # Fetch timeline data from GitHub (with rate limit handling)
+        timeline_data, cache_metadata = await fetch_pr_timeline_data(
             pr['repo_owner'],
             pr['repo_name'],
             pr['pr_number']
@@ -2023,15 +2156,27 @@ async def handle_pr_readiness(request, env, path):
             }
         }
         
+        # Add cache metadata if data is from stale cache
+        if cache_metadata.get('cache_status') == 'stale':
+            response_data['_cache'] = {
+                'status': 'stale',
+                'age': cache_metadata.get('cache_age'),
+                'message': f"⚠️ GitHub rate-limited. Showing cached data from {cache_metadata.get('cache_age')}.",
+                'warning': 'Readiness analysis may not reflect recent changes. Scores and issues may be outdated.'
+            }
+        
         # Cache the result
         await set_readiness_cache(env, pr_id, response_data)
+        
+        # Determine response headers based on cache status
+        cache_header = 'MISS' if cache_metadata.get('cache_status') == 'fresh' else 'STALE'
         
         return Response.new(
             json.dumps(response_data),
             {
                 'headers': {
                     'Content-Type': 'application/json',
-                    'X-Cache': 'MISS',
+                    'X-Cache': cache_header,
                     'Cache-Control': f'private, max-age={_READINESS_CACHE_TTL}'
                 }
             }
