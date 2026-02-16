@@ -7,9 +7,8 @@
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create pr-tracker",
     "db:init": "wrangler d1 execute pr-tracker --file=./schema.sql",
-    "lint": "echo 'Linting not configured yet' && exit 0",
-    "format:check": "echo 'Format checking not configured yet' && exit 0",
-    "test": "echo 'No tests specified yet' && exit 0"
+    "test": "npm run test:backend",
+    "test:backend": "python3 -m unittest discover -s tests -p \"test_*.py\" -v"
   },
   "keywords": [
     "github",

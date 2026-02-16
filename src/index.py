@@ -4,6 +4,7 @@ import json
 import re
 import asyncio
 from datetime import datetime, timezone
+from url_utils import parse_pr_url
 
 # Track if schema initialization has been attempted in this worker instance
 # This is safe in Cloudflare Workers Python as each isolate runs single-threaded
