@@ -2318,7 +2318,7 @@ async def handle_pr_readiness(request, env, path):
 
 async def add_cache_headers(response, cache_control):
     """
-    Helper function to clone a response and add Cache-Control headers.
+    Helper function to add Cache-Control headers to a response.
     
     Args:
         response: Original Response object
@@ -2327,15 +2327,19 @@ async def add_cache_headers(response, cache_control):
     Returns:
         New Response with added Cache-Control header
     """
+    # Create headers with existing headers plus Cache-Control
+    headers = Headers.new(response.headers)
+    headers.set('Cache-Control', cache_control)
+    
+    # Create new response with the same body and updated headers
     new_response = Response.new(
         await response.arrayBuffer(),
         {
             'status': response.status,
             'statusText': response.statusText,
-            'headers': response.headers
+            'headers': headers
         }
     )
-    new_response.headers.set('Cache-Control', cache_control)
     return new_response
 
 async def on_fetch(request, env):
@@ -2370,7 +2374,7 @@ async def on_fetch(request, env):
             response = await env.ASSETS.fetch(request)
             # Only add cache headers for successful responses
             if response.status == 200:
-                # Cache for 5 minutes (300 seconds) to balance freshness with performance
+                # Cache HTML for 5 minutes with revalidation for freshness
                 return await add_cache_headers(response, 'public, max-age=300, must-revalidate')
             return response
         # Fallback: return simple message
@@ -2430,7 +2434,7 @@ async def on_fetch(request, env):
             asset_response = await env.ASSETS.fetch(request)
             # Only add cache headers for successful responses
             if asset_response.status == 200:
-                # Cache for 1 week (604800 seconds) for immutable assets like favicon, logo, etc.
+                # Cache static assets for 1 week as immutable
                 return await add_cache_headers(asset_response, 'public, max-age=604800, immutable')
             return asset_response
         return Response.new('Not Found', {'status': 404, 'headers': cors_headers})
