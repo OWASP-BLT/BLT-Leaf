@@ -2344,7 +2344,21 @@ async def on_fetch(request, env):
     if path == '/' or path == '/index.html':
         # Use env.ASSETS to serve static files if available
         if hasattr(env, 'ASSETS'): 
-            return await env.ASSETS.fetch(request)
+            # Fetch the HTML page from assets
+            response = await env.ASSETS.fetch(request)
+            # Clone response to modify headers
+            new_response = Response.new(
+                await response.arrayBuffer(),
+                {
+                    'status': response.status,
+                    'statusText': response.statusText,
+                    'headers': response.headers
+                }
+            )
+            # Add Cache-Control header to enable browser caching
+            # Cache for 5 minutes (300 seconds) to balance freshness with performance
+            new_response.headers.set('Cache-Control', 'public, max-age=300, must-revalidate')
+            return new_response
         # Fallback: return simple message
         return Response.new('Please configure assets in wrangler.toml', 
                           {'status': 200, 'headers': {**cors_headers, 'Content-Type': 'text/html'}})
@@ -2397,7 +2411,26 @@ async def on_fetch(request, env):
     
     # If no API route matched, try static assets or return 404
     if response is None:
-        if hasattr(env, 'ASSETS'): return await env.ASSETS.fetch(request)
+        if hasattr(env, 'ASSETS'):
+            # Fetch static asset
+            asset_response = await env.ASSETS.fetch(request)
+            
+            # If it's a successful response for a static asset, add caching headers
+            if asset_response.status == 200:
+                # Clone response to modify headers
+                new_response = Response.new(
+                    await asset_response.arrayBuffer(),
+                    {
+                        'status': asset_response.status,
+                        'statusText': asset_response.statusText,
+                        'headers': asset_response.headers
+                    }
+                )
+                # Add Cache-Control header for static assets
+                # Cache for 1 week (604800 seconds) for immutable assets like favicon, logo, etc.
+                new_response.headers.set('Cache-Control', 'public, max-age=604800, immutable')
+                return new_response
+            return asset_response
         return Response.new('Not Found', {'status': 404, 'headers': cors_headers})
     
     # Apply CORS to API responses
