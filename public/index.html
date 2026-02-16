@@ -23,111 +23,130 @@
             border: 1px solid #BC0000;
         }
         
-        /* Mobile table optimizations */
+        /* Mobile table optimizations - Keep all columns, make everything tiny */
         @media (max-width: 768px) {
-            /* Make table more compact on mobile */
+            /* Make table more compact on mobile - show all 17 columns */
             #prTable {
-                min-width: 900px !important; /* Much smaller than 1750px */
+                min-width: 1200px !important; /* Compact but shows all columns */
             }
             
-            /* Reduce padding on mobile */
+            /* Reduce padding on mobile - very compact */
             #prTable th,
             #prTable td {
-                padding: 0.5rem 0.25rem !important;
-                font-size: 0.7rem !important;
+                padding: 0.25rem 0.125rem !important;
+                font-size: 0.6rem !important;
+                line-height: 1.2 !important;
             }
             
-            /* Hide less critical columns on mobile */
-            #prTable th:nth-child(7),  /* Commits column */
-            #prTable td:nth-child(7),
-            #prTable th:nth-child(8),  /* Behind column */
-            #prTable td:nth-child(8),
-            #prTable th:nth-child(12), /* Review Score column */
-            #prTable td:nth-child(12),
-            #prTable th:nth-child(13), /* Response Score column */
-            #prTable td:nth-child(13),
-            #prTable th:nth-child(14), /* Feedback Score column */
-            #prTable td:nth-child(14) {
-                display: none;
-            }
-            
-            /* Adjust column min-widths for mobile */
+            /* Make all columns tiny with minimal widths */
             #prTable th:nth-child(1),  /* Author */
             #prTable td:nth-child(1) {
-                min-width: 60px !important;
+                min-width: 50px !important;
             }
             
             #prTable th:nth-child(2),  /* PR Title */
             #prTable td:nth-child(2) {
-                min-width: 120px !important;
+                min-width: 80px !important;
             }
             
             #prTable th:nth-child(3),  /* Repository */
             #prTable td:nth-child(3) {
-                min-width: 80px !important;
+                min-width: 60px !important;
             }
             
             #prTable th:nth-child(4),  /* Review */
             #prTable td:nth-child(4) {
-                min-width: 60px !important;
+                min-width: 45px !important;
             }
             
             #prTable th:nth-child(5),  /* Mergeable */
             #prTable td:nth-child(5) {
-                min-width: 60px !important;
+                min-width: 45px !important;
             }
             
             #prTable th:nth-child(6),  /* Files */
             #prTable td:nth-child(6) {
+                min-width: 35px !important;
+            }
+            
+            #prTable th:nth-child(7),  /* Commits */
+            #prTable td:nth-child(7) {
+                min-width: 40px !important;
+            }
+            
+            #prTable th:nth-child(8),  /* Behind */
+            #prTable td:nth-child(8) {
                 min-width: 40px !important;
             }
             
             #prTable th:nth-child(9),  /* Checks */
             #prTable td:nth-child(9) {
-                min-width: 70px !important;
+                min-width: 55px !important;
             }
             
             #prTable th:nth-child(10), /* Ready Score */
             #prTable td:nth-child(10) {
-                min-width: 50px !important;
+                min-width: 40px !important;
             }
             
             #prTable th:nth-child(11), /* CI */
             #prTable td:nth-child(11) {
+                min-width: 30px !important;
+            }
+            
+            #prTable th:nth-child(12), /* Review Score */
+            #prTable td:nth-child(12) {
                 min-width: 40px !important;
+            }
+            
+            #prTable th:nth-child(13), /* Response Score */
+            #prTable td:nth-child(13) {
+                min-width: 45px !important;
+            }
+            
+            #prTable th:nth-child(14), /* Feedback Score */
+            #prTable td:nth-child(14) {
+                min-width: 50px !important;
             }
             
             #prTable th:nth-child(15), /* Issues */
             #prTable td:nth-child(15) {
-                min-width: 100px !important;
+                min-width: 70px !important;
             }
             
             #prTable th:nth-child(16), /* Updated */
             #prTable td:nth-child(16) {
-                min-width: 60px !important;
+                min-width: 45px !important;
             }
             
             #prTable th:nth-child(17), /* Actions */
             #prTable td:nth-child(17) {
-                min-width: 70px !important;
+                min-width: 60px !important;
             }
             
-            /* Make avatars smaller on mobile */
+            /* Make avatars much smaller on mobile */
             #prTable img.h-6 {
-                height: 1.25rem !important;
-                width: 1.25rem !important;
+                height: 1rem !important;
+                width: 1rem !important;
             }
             
-            /* Make badges more compact */
+            /* Make badges very compact */
             #prTable .inline-flex {
-                padding: 0.125rem 0.375rem !important;
-                font-size: 0.65rem !important;
+                padding: 0.1rem 0.25rem !important;
+                font-size: 0.55rem !important;
+                gap: 0.125rem !important;
             }
             
-            /* Adjust button size on mobile */
+            /* Adjust button size on mobile - very compact */
             #prTable .update-btn {
-                padding: 0.375rem 0.5rem !important;
-                font-size: 0.65rem !important;
+                padding: 0.25rem 0.375rem !important;
+                font-size: 0.55rem !important;
+            }
+            
+            /* Make icons smaller */
+            #prTable .fas,
+            #prTable .fa {
+                font-size: 0.55rem !important;
             }
         }
     </style>
