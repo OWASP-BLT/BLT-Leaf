@@ -43,6 +43,11 @@ _timeline_cache = {
 # Cache TTL in seconds (30 minutes - timeline data changes less frequently)
 _TIMELINE_CACHE_TTL = 1800
 
+# HTTP Cache-Control TTL for browser caching
+# HTML pages: 5 minutes to balance freshness with performance
+_HTML_CACHE_TTL = 300
+# Static assets: 1 week (immutable assets like favicon, logo, etc.)
+_STATIC_ASSET_CACHE_TTL = 604800
 # Score multiplier when changes are requested
 # Reduces overall readiness score by 50% when reviewers request changes
 _CHANGES_REQUESTED_SCORE_MULTIPLIER = 0.5
@@ -2504,6 +2509,37 @@ async def handle_pr_readiness(request, env, path):
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
+async def add_cache_headers(response, cache_control):
+    """
+    Helper function to add Cache-Control headers to a response.
+    
+    Creates a new Response with the same body and headers as the original,
+    plus the Cache-Control header. This is necessary because Response headers
+    are immutable in Cloudflare Workers.
+    
+    Args:
+        response: Original Response object
+        cache_control: Cache-Control header value to set
+        
+    Returns:
+        New Response with added Cache-Control header
+    """
+    # Create headers with existing headers plus Cache-Control
+    headers = Headers.new(response.headers)
+    headers.set('Cache-Control', cache_control)
+    
+    # Create new response with the same body and updated headers
+    # Using arrayBuffer() to consume the body is required for cloning in Cloudflare Workers
+    new_response = Response.new(
+        await response.arrayBuffer(),
+        {
+            'status': response.status,
+            'statusText': response.statusText,
+            'headers': headers
+        }
+    )
+    return new_response
+
 async def on_fetch(request, env):
     """Main request handler"""
     url = URL.new(request.url)
@@ -2532,7 +2568,13 @@ async def on_fetch(request, env):
     if path == '/' or path == '/index.html':
         # Use env.ASSETS to serve static files if available
         if hasattr(env, 'ASSETS'): 
-            return await env.ASSETS.fetch(request)
+            # Fetch the HTML page from assets
+            response = await env.ASSETS.fetch(request)
+            # Only add cache headers for successful responses
+            if response.status == 200:
+                # Cache HTML with revalidation for freshness
+                return await add_cache_headers(response, f'public, max-age={_HTML_CACHE_TTL}, must-revalidate')
+            return response
         # Fallback: return simple message
         return Response.new('Please configure assets in wrangler.toml', 
                           {'status': 200, 'headers': {**cors_headers, 'Content-Type': 'text/html'}})
@@ -2596,7 +2638,14 @@ async def on_fetch(request, env):
     
     # If no API route matched, try static assets or return 404
     if response is None:
-        if hasattr(env, 'ASSETS'): return await env.ASSETS.fetch(request)
+        if hasattr(env, 'ASSETS'):
+            # Fetch static asset
+            asset_response = await env.ASSETS.fetch(request)
+            # Only add cache headers for successful responses
+            if asset_response.status == 200:
+                # Cache static assets as immutable
+                return await add_cache_headers(asset_response, f'public, max-age={_STATIC_ASSET_CACHE_TTL}, immutable')
+            return asset_response
         return Response.new('Not Found', {'status': 404, 'headers': cors_headers})
     
     # Apply CORS to API responses
