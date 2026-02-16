@@ -98,6 +98,7 @@ async def get_readiness_cache(env, pr_id):
     Returns:
         Cached data dict if valid, None if expired or not found
     """
+    # Lazy import to avoid circular dependency (database -> cache)
     from database import load_readiness_from_db
     
     global _readiness_cache
@@ -143,6 +144,7 @@ async def set_readiness_cache(env, pr_id, data):
         pr_id: PR ID
         data: Readiness data to cache
     """
+    # Lazy import to avoid circular dependency (database -> cache)
     from database import save_readiness_to_db
     
     global _readiness_cache
@@ -166,6 +168,7 @@ async def invalidate_readiness_cache(env, pr_id):
         env: Worker environment with database binding
         pr_id: PR ID
     """
+    # Lazy import to avoid circular dependency (database -> cache)
     from database import delete_readiness_from_db
     
     global _readiness_cache
