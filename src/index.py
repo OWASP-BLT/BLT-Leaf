@@ -675,6 +675,24 @@ async def init_database_schema(env):
         print(f"Note: Schema initialization check: {str(e)}")
         # Schema likely already exists, which is fine
 
+def log_github_api_call(url, response):
+    """Log GitHub API calls with rate limit information"""
+    if 'api.github.com' in url:
+        rate_limit = response.headers.get('x-ratelimit-limit')
+        rate_remaining = response.headers.get('x-ratelimit-remaining')
+        rate_reset = response.headers.get('x-ratelimit-reset')
+        
+        # Convert Unix timestamp to human-readable format if available
+        reset_time = 'N/A'
+        if rate_reset:
+            try:
+                reset_dt = datetime.fromtimestamp(int(rate_reset), tz=timezone.utc)
+                reset_time = reset_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+            except (ValueError, TypeError):
+                reset_time = rate_reset
+        
+        print(f"GitHub API: {url} | Status: {response.status} | Rate Limit: {rate_remaining}/{rate_limit} remaining | Reset: {reset_time}")
+
 async def fetch_with_headers(url, headers=None, token=None):
     """Helper to fetch with proper header handling using pyodide.ffi.to_js"""
     if not headers:
@@ -693,11 +711,7 @@ async def fetch_with_headers(url, headers=None, token=None):
     response = await fetch(url, options)
     
     # Log GitHub API call with rate limit information
-    if 'api.github.com' in url:
-        rate_limit = response.headers.get('x-ratelimit-limit')
-        rate_remaining = response.headers.get('x-ratelimit-remaining')
-        rate_reset = response.headers.get('x-ratelimit-reset')
-        print(f"GitHub API: {url} | Status: {response.status} | Rate Limit: {rate_remaining}/{rate_limit} remaining | Reset: {rate_reset}")
+    log_github_api_call(url, response)
     
     return response
 
@@ -866,11 +880,7 @@ async def fetch_paginated_data(url, headers):
         response = await fetch(current_url, fetch_options)
         
         # Log GitHub API call with rate limit information
-        if 'api.github.com' in current_url:
-            rate_limit = response.headers.get('x-ratelimit-limit')
-            rate_remaining = response.headers.get('x-ratelimit-remaining')
-            rate_reset = response.headers.get('x-ratelimit-reset')
-            print(f"GitHub API: {current_url} | Status: {response.status} | Rate Limit: {rate_remaining}/{rate_limit} remaining | Reset: {rate_reset}")
+        log_github_api_call(current_url, response)
         
         if not response.ok:
             status = getattr(response, 'status', 'unknown')
