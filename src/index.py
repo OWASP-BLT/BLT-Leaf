@@ -1645,6 +1645,136 @@ async def handle_refresh_pr(request, env):
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
+async def handle_refresh_repo(request, env):
+    """Refresh all PRs in a specific repository"""
+    try:
+        data = (await request.json()).to_py()
+        repo_owner = data.get('repo_owner')
+        repo_name = data.get('repo_name')
+        user_token = request.headers.get('x-github-token')
+        
+        if not repo_owner or not repo_name:
+            return Response.new(json.dumps({'error': 'Repository owner and name are required'}), 
+                              {'status': 400, 'headers': {'Content-Type': 'application/json'}})
+        
+        # Get all PRs for this repository
+        db = get_db(env)
+        stmt = db.prepare('SELECT id, pr_url, repo_owner, repo_name, pr_number FROM prs WHERE repo_owner = ? AND repo_name = ?')
+        stmt = stmt.bind(repo_owner, repo_name)
+        result = await stmt.all()
+        
+        if not result or not result.results:
+            return Response.new(json.dumps({'error': 'No PRs found in this repository'}), 
+                              {'status': 404, 'headers': {'Content-Type': 'application/json'}})
+        
+        prs = [r.to_py() for r in result.results]
+        updated_count = 0
+        removed_count = 0
+        
+        # Refresh each PR
+        for pr in prs:
+            try:
+                # Fetch fresh data from GitHub
+                pr_data = await fetch_pr_data(pr['repo_owner'], pr['repo_name'], pr['pr_number'], user_token)
+                
+                if not pr_data:
+                    continue
+                
+                # Check if PR is now merged or closed - delete it from database
+                if pr_data['is_merged'] or pr_data['state'] == 'closed':
+                    # Invalidate caches
+                    await invalidate_readiness_cache(env, pr['id'])
+                    invalidate_timeline_cache(pr['repo_owner'], pr['repo_name'], pr['pr_number'])
+                    
+                    # Delete the PR
+                    delete_stmt = db.prepare('DELETE FROM prs WHERE id = ?').bind(pr['id'])
+                    await delete_stmt.run()
+                    removed_count += 1
+                    continue
+                
+                # Update the PR
+                await upsert_pr(db, pr['pr_url'], pr['repo_owner'], pr['repo_name'], pr['pr_number'], pr_data)
+                
+                # Invalidate caches after successful refresh
+                await invalidate_readiness_cache(env, pr['id'])
+                invalidate_timeline_cache(pr['repo_owner'], pr['repo_name'], pr['pr_number'])
+                
+                updated_count += 1
+            except Exception as e:
+                print(f"Error refreshing PR {pr['pr_number']}: {str(e)}")
+                continue
+        
+        return Response.new(json.dumps({
+            'success': True,
+            'updated_count': updated_count,
+            'removed_count': removed_count,
+            'message': f'Refreshed {updated_count} PR(s), removed {removed_count} closed/merged PR(s)'
+        }), {'headers': {'Content-Type': 'application/json'}})
+    except Exception as e:
+        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
+                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+
+async def handle_refresh_all(request, env):
+    """Refresh all PRs across all repositories"""
+    try:
+        user_token = request.headers.get('x-github-token')
+        
+        # Get all PRs
+        db = get_db(env)
+        stmt = db.prepare('SELECT id, pr_url, repo_owner, repo_name, pr_number FROM prs')
+        result = await stmt.all()
+        
+        if not result or not result.results:
+            return Response.new(json.dumps({'error': 'No PRs found'}), 
+                              {'status': 404, 'headers': {'Content-Type': 'application/json'}})
+        
+        prs = [r.to_py() for r in result.results]
+        updated_count = 0
+        removed_count = 0
+        
+        # Refresh each PR
+        for pr in prs:
+            try:
+                # Fetch fresh data from GitHub
+                pr_data = await fetch_pr_data(pr['repo_owner'], pr['repo_name'], pr['pr_number'], user_token)
+                
+                if not pr_data:
+                    continue
+                
+                # Check if PR is now merged or closed - delete it from database
+                if pr_data['is_merged'] or pr_data['state'] == 'closed':
+                    # Invalidate caches
+                    await invalidate_readiness_cache(env, pr['id'])
+                    invalidate_timeline_cache(pr['repo_owner'], pr['repo_name'], pr['pr_number'])
+                    
+                    # Delete the PR
+                    delete_stmt = db.prepare('DELETE FROM prs WHERE id = ?').bind(pr['id'])
+                    await delete_stmt.run()
+                    removed_count += 1
+                    continue
+                
+                # Update the PR
+                await upsert_pr(db, pr['pr_url'], pr['repo_owner'], pr['repo_name'], pr['pr_number'], pr_data)
+                
+                # Invalidate caches after successful refresh
+                await invalidate_readiness_cache(env, pr['id'])
+                invalidate_timeline_cache(pr['repo_owner'], pr['repo_name'], pr['pr_number'])
+                
+                updated_count += 1
+            except Exception as e:
+                print(f"Error refreshing PR {pr['pr_number']} in {pr['repo_owner']}/{pr['repo_name']}: {str(e)}")
+                continue
+        
+        return Response.new(json.dumps({
+            'success': True,
+            'updated_count': updated_count,
+            'removed_count': removed_count,
+            'message': f'Refreshed {updated_count} PR(s), removed {removed_count} closed/merged PR(s)'
+        }), {'headers': {'Content-Type': 'application/json'}})
+    except Exception as e:
+        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
+                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+
 async def handle_rate_limit(env):
     """Fetch GitHub API rate limit status
     
@@ -2316,6 +2446,10 @@ async def on_fetch(request, env):
         response = await handle_list_repos(env)
     elif path == '/api/refresh' and request.method == 'POST':
         response = await handle_refresh_pr(request, env)
+    elif path == '/api/refresh-repo' and request.method == 'POST':
+        response = await handle_refresh_repo(request, env)
+    elif path == '/api/refresh-all' and request.method == 'POST':
+        response = await handle_refresh_all(request, env)
     elif path == '/api/rate-limit' and request.method == 'GET':
         response = await handle_rate_limit(env)
         for key, value in cors_headers.items():

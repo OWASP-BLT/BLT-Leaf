@@ -82,8 +82,18 @@
                 <h2 class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Repositories <span id="repoCountDisplay"></span></h2>
                 <ul id="repoList" class="space-y-2">
                     <li class="repo-item active cursor-pointer rounded-lg border border-[#f5b0b0] bg-[#fff1f1] px-3 py-2 dark:border-red-900 dark:bg-red-950/30" data-repo="all">
-                        <div class="repo-name text-sm font-semibold text-[#BC0000] dark:text-red-400">All Repositories</div>
-                        <div class="repo-count mt-0.5 text-xs text-slate-500 dark:text-slate-400" id="allReposCount">0 PRs</div>
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex-1 min-w-0 cursor-pointer" id="allReposClickable">
+                                <div class="repo-name text-sm font-semibold text-[#BC0000] dark:text-red-400">All Repositories</div>
+                                <div class="repo-count mt-0.5 text-xs text-slate-500 dark:text-slate-400" id="allReposCount">0 PRs</div>
+                            </div>
+                            <button 
+                                id="refreshAllReposBtn"
+                                class="flex-shrink-0 rounded-md border border-[#E10000] bg-white px-2 py-1 text-xs font-medium text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30 transition-colors"
+                                title="Refresh all PRs across all repositories">
+                                <i class="fas fa-sync text-xs"></i>
+                            </button>
+                        </div>
                     </li>
                 </ul>
             </div>  
@@ -1118,6 +1128,123 @@
             }
         }
 
+        async function refreshRepoAllPRs(repoOwner, repoName, button) {
+            const originalHtml = button.innerHTML;
+            
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i>';
+            button.classList.add('opacity-70', 'cursor-not-allowed');
+
+            try {
+                // Get all PRs for this repository
+                const prsInRepo = allPrs.filter(pr => 
+                    pr.repo_owner === repoOwner && pr.repo_name === repoName
+                );
+
+                if (prsInRepo.length === 0) {
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('opacity-70', 'cursor-not-allowed');
+                    return;
+                }
+
+                // Call the bulk refresh endpoint
+                const response = await fetch('/api/refresh-repo', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        repo_owner: repoOwner,
+                        repo_name: repoName
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.error) {
+                    showError(result.error);
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('opacity-70', 'cursor-not-allowed');
+                    return;
+                }
+
+                // Reload PRs to get updated data
+                await loadPrs();
+                await loadRateLimit();
+
+                button.innerHTML = '<i class="fas fa-check text-xs"></i>';
+                setTimeout(() => {
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('opacity-70', 'cursor-not-allowed');
+                }, 2000);
+
+                showError(`Successfully refreshed ${result.updated_count} PR${result.updated_count !== 1 ? 's' : ''} in ${repoOwner}/${repoName}`);
+            } catch (error) {
+                console.error('Error refreshing repository PRs:', error);
+                showError('Failed to refresh repository PRs');
+                button.innerHTML = originalHtml;
+                button.disabled = false;
+                button.classList.remove('opacity-70', 'cursor-not-allowed');
+            }
+        }
+
+        async function refreshAllPRs(button) {
+            const originalHtml = button.innerHTML;
+            
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i>';
+            button.classList.add('opacity-70', 'cursor-not-allowed');
+
+            try {
+                if (allPrs.length === 0) {
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('opacity-70', 'cursor-not-allowed');
+                    return;
+                }
+
+                // Call the bulk refresh endpoint for all repos
+                const response = await fetch('/api/refresh-all', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+                
+                if (result.error) {
+                    showError(result.error);
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('opacity-70', 'cursor-not-allowed');
+                    return;
+                }
+
+                // Reload PRs to get updated data
+                await loadPrs();
+                await loadRateLimit();
+
+                button.innerHTML = '<i class="fas fa-check text-xs"></i>';
+                setTimeout(() => {
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('opacity-70', 'cursor-not-allowed');
+                }, 2000);
+
+                showError(`Successfully refreshed ${result.updated_count} PR${result.updated_count !== 1 ? 's' : ''} across all repositories`);
+            } catch (error) {
+                console.error('Error refreshing all PRs:', error);
+                showError('Failed to refresh all PRs');
+                button.innerHTML = originalHtml;
+                button.disabled = false;
+                button.classList.remove('opacity-70', 'cursor-not-allowed');
+            }
+        }
+
         async function addPr() {
             const input = document.getElementById('prUrlInput');
             const btn = document.getElementById('addPrBtn');
@@ -1218,6 +1345,21 @@
 
         // Make sortPrs globally accessible for onclick handlers
         window.sortPrs = sortPrs;
+
+        // Initialize "All Repositories" refresh button event listener
+        document.getElementById('allReposClickable').addEventListener('click', () => {
+            currentRepo = 'all';
+            localStorage.setItem('currentRepo', currentRepo);
+            document.querySelectorAll('.repo-item').forEach(item => {
+                setRepoItemActiveState(item, item.dataset.repo === currentRepo);
+            });
+            loadPrs();
+        });
+
+        document.getElementById('refreshAllReposBtn').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await refreshAllPRs(e.currentTarget);
+        });
 
         initTheme();
         loadRateLimit();
