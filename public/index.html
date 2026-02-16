@@ -22,6 +22,116 @@
             color: #fff;
             border: 1px solid #BC0000;
         }
+        
+        /* Mobile table optimizations */
+        @media (max-width: 768px) {
+            /* Make table more compact on mobile */
+            #prTable {
+                min-width: 900px !important; /* Much smaller than 1750px */
+            }
+            
+            /* Reduce padding on mobile */
+            #prTable th,
+            #prTable td {
+                padding: 0.5rem 0.25rem !important;
+                font-size: 0.7rem !important;
+            }
+            
+            /* Hide less critical columns on mobile */
+            #prTable th:nth-child(7),  /* Commits column */
+            #prTable td:nth-child(7),
+            #prTable th:nth-child(8),  /* Behind column */
+            #prTable td:nth-child(8),
+            #prTable th:nth-child(12), /* CI Score column */
+            #prTable td:nth-child(12),
+            #prTable th:nth-child(13), /* Review Score column */
+            #prTable td:nth-child(13),
+            #prTable th:nth-child(14), /* Response Score column */
+            #prTable td:nth-child(14),
+            #prTable th:nth-child(15), /* Feedback Score column */
+            #prTable td:nth-child(15) {
+                display: none;
+            }
+            
+            /* Adjust column min-widths for mobile */
+            #prTable th:nth-child(1),  /* Author */
+            #prTable td:nth-child(1) {
+                min-width: 60px !important;
+            }
+            
+            #prTable th:nth-child(2),  /* PR Title */
+            #prTable td:nth-child(2) {
+                min-width: 120px !important;
+            }
+            
+            #prTable th:nth-child(3),  /* Repository */
+            #prTable td:nth-child(3) {
+                min-width: 80px !important;
+            }
+            
+            #prTable th:nth-child(4),  /* Review */
+            #prTable td:nth-child(4) {
+                min-width: 60px !important;
+            }
+            
+            #prTable th:nth-child(5),  /* Mergeable */
+            #prTable td:nth-child(5) {
+                min-width: 60px !important;
+            }
+            
+            #prTable th:nth-child(6),  /* Files */
+            #prTable td:nth-child(6) {
+                min-width: 40px !important;
+            }
+            
+            #prTable th:nth-child(9),  /* Checks */
+            #prTable td:nth-child(9) {
+                min-width: 70px !important;
+            }
+            
+            #prTable th:nth-child(10), /* Ready Score */
+            #prTable td:nth-child(10) {
+                min-width: 50px !important;
+            }
+            
+            #prTable th:nth-child(11), /* CI */
+            #prTable td:nth-child(11) {
+                min-width: 40px !important;
+            }
+            
+            #prTable th:nth-child(16), /* Issues */
+            #prTable td:nth-child(16) {
+                min-width: 100px !important;
+            }
+            
+            #prTable th:nth-child(17), /* Updated */
+            #prTable td:nth-child(17) {
+                min-width: 60px !important;
+            }
+            
+            #prTable th:nth-child(18), /* Actions */
+            #prTable td:nth-child(18) {
+                min-width: 70px !important;
+            }
+            
+            /* Make avatars smaller on mobile */
+            #prTable img.h-6 {
+                height: 1.25rem !important;
+                width: 1.25rem !important;
+            }
+            
+            /* Make badges more compact */
+            #prTable .inline-flex {
+                padding: 0.125rem 0.375rem !important;
+                font-size: 0.65rem !important;
+            }
+            
+            /* Adjust button size on mobile */
+            #prTable .update-btn {
+                padding: 0.375rem 0.5rem !important;
+                font-size: 0.65rem !important;
+            }
+        }
     </style>
 </head>
 
@@ -640,7 +750,7 @@
 
             container.innerHTML = `
                 <div class="rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800" style="overflow-x: auto;">
-                    <table class="w-full text-left text-sm" style="min-width: 1750px;">
+                    <table id="prTable" class="w-full text-left text-sm" style="min-width: 1750px;">
                         <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
                             <tr>
                                 <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="author_login" style="min-width: 100px;" title="Click to sort by Author. Shift+Click to set as secondary sort.&#10;API: GET /repos/{owner}/{repo}/pulls/{pr_number} (user.login field)">
