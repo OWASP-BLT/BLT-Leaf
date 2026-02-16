@@ -7,13 +7,15 @@
     <title>PR Readiness Checker - BLT-Leaf</title>
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
     <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        tailwind.config = {
-            darkMode: 'class'
+        window.tailwind = {
+            config: {
+                darkMode: 'class'
+            }
         }
     </script>
     <!-- Font Awesome -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <style>
         /* Fallback visibility if CDN is blocked */
@@ -41,6 +43,8 @@
                         <div class="h-full w-0 rounded-full bg-green-500 transition-all duration-300" id="rateLimitFill"></div>
                     </div>
                     <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400" id="rateLimitText">N/A</span>
+                    <span class="text-[10px] text-slate-400 dark:text-slate-500" id="rateLimitUsed"></span>
+                    <span class="text-[10px] text-slate-400 dark:text-slate-500" id="rateLimitReset"></span>
                 </div>
             </div>
 
@@ -129,6 +133,9 @@
         let sortDirection = localStorage.getItem('sortDirection') || 'desc';
         let secondarySortColumn = null;
         let secondarySortDirection = 'desc';
+        let currentPage = 1;
+        let totalPages = 1;
+        const perPage = 30;
 
         // Helper functions for readiness data persistence
         function saveReadinessData(prId, readiness, reviewHealth) {
@@ -200,24 +207,35 @@
 
         async function loadRateLimit() {
             try {
+                const MS_PER_MINUTE = 60000;
+                const MINUTES_PER_HOUR = 60;
+                
                 const response = await fetch('/api/rate-limit');
                 const textEl = document.getElementById('rateLimitText');
                 const fillEl = document.getElementById('rateLimitFill');
+                const usedEl = document.getElementById('rateLimitUsed');
+                const resetEl = document.getElementById('rateLimitReset');
 
                 if (!response.ok) {
                     if(textEl) textEl.textContent = 'N/A';
+                    if(usedEl) usedEl.textContent = '';
+                    if(resetEl) resetEl.textContent = '';
                     return;
                 }
 
                 const data = await response.json();
                 if (data.error) {
                     if(textEl) textEl.textContent = 'N/A';
+                    if(usedEl) usedEl.textContent = '';
+                    if(resetEl) resetEl.textContent = '';
                     return;
                 }
 
-                const { limit, remaining } = data;
+                const { limit, remaining, used, reset } = data;
                 if (typeof limit !== 'number' || typeof remaining !== 'number') {
                     if(textEl) textEl.textContent = 'N/A';
+                    if(usedEl) usedEl.textContent = '';
+                    if(resetEl) resetEl.textContent = '';
                     return;
                 }
 
@@ -236,11 +254,42 @@
                 }
                 
                 if(textEl) textEl.textContent = `${remaining} / ${limit}`;
+                
+                // Display used count
+                if(usedEl && typeof used === 'number') {
+                    usedEl.textContent = `(${used} used)`;
+                }
+                
+                // Display reset time in human-readable format
+                if(resetEl && typeof reset === 'number') {
+                    const resetDate = new Date(reset * 1000);
+                    const now = new Date();
+                    const diffMs = resetDate - now;
+                    const diffMins = Math.floor(diffMs / MS_PER_MINUTE);
+                    
+                    if (diffMins <= 0) {
+                        resetEl.textContent = 'Resets soon';
+                    } else if (diffMins < MINUTES_PER_HOUR) {
+                        resetEl.textContent = `Resets in ${diffMins}m`;
+                    } else {
+                        const diffHours = Math.floor(diffMins / MINUTES_PER_HOUR);
+                        const remainingMins = diffMins % MINUTES_PER_HOUR;
+                        if (remainingMins === 0) {
+                            resetEl.textContent = `Resets in ${diffHours}h`;
+                        } else {
+                            resetEl.textContent = `Resets in ${diffHours}h ${remainingMins}m`;
+                        }
+                    }
+                }
 
             } catch (error) {
                 console.error('Error loading rate limit:', error);
                 const textEl = document.getElementById('rateLimitText');
+                const usedEl = document.getElementById('rateLimitUsed');
+                const resetEl = document.getElementById('rateLimitReset');
                 if(textEl) textEl.textContent = 'N/A';
+                if(usedEl) usedEl.textContent = '';
+                if(resetEl) resetEl.textContent = '';
             }
         }
 
@@ -505,6 +554,7 @@
                 `;
 
                 li.addEventListener('click', () => {
+                    currentPage = 1;
                     currentRepo = li.dataset.repo;
                     localStorage.setItem('currentRepo', currentRepo);
                     document.querySelectorAll('.repo-item').forEach(item => {
@@ -530,7 +580,8 @@
             }
 
             try {
-                const url = currentRepo === 'all' ? '/api/prs' : `/api/prs?repo=${encodeURIComponent(currentRepo)}`;
+                const baseUrl = currentRepo === 'all' ? `/api/prs?page=${currentPage}`: `/api/prs?repo=${encodeURIComponent(currentRepo)}&page=${currentPage}`;
+                const url = baseUrl;
                 const response = await fetch(url);
                 const data = await response.json();
 
@@ -540,8 +591,14 @@
                 }
 
                 allPrs = data.prs;
-                
-                // Attach readiness data from database or localStorage to each PR for sorting
+                if (data.pagination) {
+                    totalPages = data.pagination.total_pages;
+                    if (currentPage > totalPages && totalPages > 0) {
+                        currentPage = totalPages;
+                    }
+                }
+
+                // Attach readiness data from localStorage to each PR for sorting
                 allPrs.forEach(pr => {
                     // First, try to get readiness data from database (if it exists)
                     if (pr.overall_score !== null && pr.overall_score !== undefined) {
@@ -622,7 +679,7 @@
         function renderPrList(prsToRender) {
             const container = document.getElementById('prListContainer');
             // Use the passed filtered list OR fallback to allPrs
-            const prs = prsToRender || allPrs;
+            const prs = prsToRender || allPrs || [];
 
             if (prs.length === 0) {
                 const isFiltered = document.getElementById('prSearchInput').value.trim() !== '';
@@ -766,7 +823,7 @@
             }
 
             const tbody = document.getElementById('prTableBody');
-            allPrs.forEach(pr => {
+            prs.forEach(pr => {
                 const row = createPrRow(pr);
                 tbody.appendChild(row);
 
@@ -839,7 +896,61 @@
                     await updatePr(prId, e.currentTarget);
                 });
             });
+            if (document.getElementById('prSearchInput').value.trim() === '') {
+                renderPagination();
         }
+        }
+
+        function renderPagination() {
+            const container = document.getElementById('prListContainer');
+
+            // Remove existing pagination if present
+            const existing = container.querySelector('.pagination-wrapper');
+            if (existing) existing.remove();
+
+            const paginationDiv = document.createElement('div');
+            paginationDiv.className = 'pagination-wrapper flex items-center justify-between mt-4';
+
+            paginationDiv.innerHTML = `
+                <div class="text-sm text-slate-600 dark:text-slate-400">
+                    Page <span class="font-semibold">${currentPage}</span> of <span class="font-semibold">${totalPages}</span>
+                </div>
+            <div class="flex gap-2">
+                <button 
+                    ${currentPage === 1 ? 'disabled' : ''} 
+                    class="px-4 py-2 rounded-lg border text-sm font-semibold transition-all
+                           ${currentPage === 1 
+                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed dark:bg-slate-700 dark:text-slate-500'
+                            : 'bg-white hover:bg-red-50 border-slate-300 hover:border-red-300 dark:bg-slate-800 dark:hover:bg-slate-700'}"
+                    id="prevPageBtn"> ← Previous
+                </button>
+
+                <button 
+                    ${currentPage === totalPages ? 'disabled' : ''} 
+                    class="px-4 py-2 rounded-lg border text-sm font-semibold transition-all
+                            ${currentPage === totalPages 
+                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed dark:bg-slate-700 dark:text-slate-500'
+                            : 'bg-white hover:bg-red-50 border-slate-300 hover:border-red-300 dark:bg-slate-800 dark:hover:bg-slate-700'}"
+                    id="nextPageBtn"> Next →
+                </button>
+            </div>
+        `;
+
+        container.appendChild(paginationDiv);
+
+        document.getElementById('prevPageBtn')?.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                loadPrs();
+            }
+        });
+        document.getElementById('nextPageBtn')?.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage++;
+                loadPrs();
+            }
+        });
+    }
 
         function createPrRow(pr) {
             let stateBadge = '';
@@ -1241,6 +1352,7 @@
 
         // Search listener
         document.getElementById('prSearchInput').addEventListener('input', (e) => {
+            currentPage = 1;
             filterPrs(e.target.value);
         });
 
@@ -1251,6 +1363,7 @@
 
         document.querySelector('[data-repo="all"]').addEventListener('click', () => {
             currentRepo = 'all';
+            currentPage = 1;
             localStorage.setItem('currentRepo', currentRepo);
             document.querySelectorAll('.repo-item').forEach(item => {
                 setRepoItemActiveState(item, item.dataset.repo === currentRepo);
