@@ -54,6 +54,10 @@ _pr_data_cache = {
 # Cache TTL in seconds (5 minutes - balance freshness vs API usage)
 _PR_CACHE_TTL = 300
 
+# Score multiplier when changes are requested
+# Reduces overall readiness score by 50% when reviewers request changes
+_CHANGES_REQUESTED_SCORE_MULTIPLIER = 0.5
+
 def parse_pr_url(pr_url):
     """
     Parse GitHub PR URL to extract owner, repo, and PR number.
@@ -268,6 +272,7 @@ async def save_readiness_to_db(env, pr_id, readiness_data):
         blockers_json = json.dumps(readiness.get('blockers', []))
         warnings_json = json.dumps(readiness.get('warnings', []))
         recommendations_json = json.dumps(readiness.get('recommendations', []))
+        stale_feedback_json = json.dumps(review_health.get('stale_feedback', []))
         
         # Update the existing PR row with readiness data
         stmt = db.prepare('''
@@ -285,6 +290,8 @@ async def save_readiness_to_db(env, pr_id, readiness_data):
                 response_rate = ?,
                 total_feedback = ?,
                 responded_feedback = ?,
+                stale_feedback_count = ?,
+                stale_feedback = ?,
                 readiness_computed_at = CURRENT_TIMESTAMP
             WHERE id = ?
         ''')
@@ -303,6 +310,8 @@ async def save_readiness_to_db(env, pr_id, readiness_data):
             review_health.get('response_rate'),
             review_health.get('total_feedback'),
             review_health.get('responded_feedback'),
+            review_health.get('stale_feedback_count'),
+            stale_feedback_json,
             pr_id
         ).run()
         
@@ -333,6 +342,7 @@ async def load_readiness_from_db(env, pr_id):
                    merge_ready, blockers, warnings, recommendations,
                    review_health_classification, review_health_score, 
                    response_rate, total_feedback, responded_feedback,
+                   stale_feedback_count, stale_feedback,
                    readiness_computed_at
             FROM prs WHERE id = ?
         ''')
@@ -367,6 +377,12 @@ async def load_readiness_from_db(env, pr_id):
             recommendations = json.loads(pr.get('recommendations', '[]'))
         except Exception as e:
             print(f"Failed to parse recommendations JSON for PR {pr_id}: {str(e)}")
+            return None
+        
+        try:
+            stale_feedback = json.loads(pr.get('stale_feedback', '[]'))
+        except Exception as e:
+            print(f"Failed to parse stale_feedback JSON for PR {pr_id}: {str(e)}")
             return None
         
         # Get numeric values for display formatting
@@ -407,8 +423,10 @@ async def load_readiness_from_db(env, pr_id):
                 'score_display': f"{pr.get('review_health_score', 0)}%",
                 'response_rate': response_rate,
                 'response_rate_display': f"{int(response_rate * 100)}%",
-                'total_feedback': pr.get('total_feedback'),
-                'responded_feedback': pr.get('responded_feedback')
+                'total_feedback': pr.get('total_feedback') or 0,
+                'responded_feedback': pr.get('responded_feedback') or 0,
+                'stale_feedback_count': pr.get('stale_feedback_count') or 0,
+                'stale_feedback': stale_feedback
             },
             'ci_checks': {
                 'passed': pr.get('checks_passed'),
@@ -449,6 +467,8 @@ async def delete_readiness_from_db(env, pr_id):
                 response_rate = NULL,
                 total_feedback = NULL,
                 responded_feedback = NULL,
+                stale_feedback_count = NULL,
+                stale_feedback = NULL,
                 readiness_computed_at = NULL
             WHERE id = ?
         ''')
@@ -644,6 +664,8 @@ async def init_database_schema(env):
                 response_rate REAL,
                 total_feedback INTEGER,
                 responded_feedback INTEGER,
+                stale_feedback_count INTEGER,
+                stale_feedback TEXT,
                 readiness_computed_at TEXT,
                 is_draft INTEGER DEFAULT 0
             )
@@ -679,6 +701,8 @@ async def init_database_schema(env):
                 ('response_rate', 'REAL'),
                 ('total_feedback', 'INTEGER'),
                 ('responded_feedback', 'INTEGER'),
+                ('stale_feedback_count', 'INTEGER'),
+                ('stale_feedback', 'TEXT'),
                 ('readiness_computed_at', 'TEXT'),
                 ('is_draft', 'INTEGER DEFAULT 0')
             ]
@@ -1427,7 +1451,13 @@ def calculate_pr_readiness(pr_data, review_classification, review_score):
     )
     
     # Weighted combination: 45% CI, 55% Review (reduced CI weight due to flaky tests)
-    overall_score = int((ci_score * 0.45) + (review_score * 0.55))
+    overall_score_raw = (ci_score * 0.45) + (review_score * 0.55)
+    
+    # Reduce readiness by 50% when changes are requested
+    if review_classification == 'AWAITING_AUTHOR':
+        overall_score_raw *= _CHANGES_REQUESTED_SCORE_MULTIPLIER
+    
+    overall_score = int(overall_score_raw)
     
     # Force score to 0% for Draft PRs
     is_draft = pr_data.get('is_draft') == 1 or pr_data.get('is_draft') == True
@@ -2488,7 +2518,8 @@ async def handle_pr_readiness(request, env, path):
                 'responded_feedback': review_data['responded_count'],
                 'response_rate': review_data['response_rate'],
                 'response_rate_display': f"{int(review_data['response_rate'] * 100)}%",
-                'stale_feedback_count': len(review_data['stale_feedback'])
+                'stale_feedback_count': len(review_data['stale_feedback']),
+                'stale_feedback': review_data['stale_feedback']
             },
             'ci_checks': {
                 'passed': pr['checks_passed'],
