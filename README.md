@@ -153,6 +153,9 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
    - Check status (passed/failed/skipped)
    - Last updated time
 3. **Sort PRs**: Click any column header to sort by that column
+   - Sorting works across all pages (server-side sorting)
+   - Click again to toggle ascending/descending order
+   - Sorting resets to page 1 for consistent results
 4. **Filter by Repo**: Click on a repository in the sidebar to filter PRs
 5. **Refresh Data**: Use the refresh button to update PR information from GitHub
    - Note: If a PR has been merged or closed since being added, it will be automatically removed from tracking.
@@ -185,7 +188,13 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
 ### Core Endpoints
 - `GET /` - Serves the HTML interface
 - `GET /api/repos` - List all repositories with open PRs
-- `GET /api/prs` - List all open PRs (optional `?repo=owner/name` filter)
+- `GET /api/prs` - List all open PRs with pagination and sorting
+  - Query parameters:
+    - `?repo=owner/name` - Filter by repository (optional)
+    - `?page=N` - Page number (default: 1)
+    - `?sort_by=column` - Sort column (default: `last_updated_at`)
+    - `?sort_dir=asc|desc` - Sort direction (default: `desc`)
+  - Supported sort columns: `title`, `author_login`, `pr_number`, `files_changed`, `checks_passed`, `checks_failed`, `checks_skipped`, `review_status`, `mergeable_state`, `commits_count`, `behind_by`, `ready_score`, `ci_score`, `review_score`, `response_score`, `feedback_score`, `last_updated_at`
 - `POST /api/prs` - Add a new PR (body: `{"pr_url": "..."}`)
   - Returns 400 error if PR is merged or closed
 - `POST /api/refresh` - Refresh a PR's data (body: `{"pr_id": 123}`)
@@ -213,7 +222,7 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
 ### Webhook Endpoint (NEW)
 - `POST /api/github/webhook` - GitHub webhook integration for automatic PR tracking
   - Automatically adds new PRs to tracking when they are opened
-  - Updates existing PRs when they are modified (synchronize, edited)
+  - Updates existing PRs when they are modified (synchronize, edited, reviews, checks)
   - Removes PRs from tracking when they are closed or merged
   - Supported webhook events:
     - `pull_request.opened` - Automatically adds PR to tracking
@@ -221,8 +230,9 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
     - `pull_request.reopened` - Re-adds PR to tracking
     - `pull_request.synchronize` - Updates PR when new commits are pushed
     - `pull_request.edited` - Updates PR when details change
-    - `pull_request_review.*` - Acknowledged (future enhancement)
-    - `check_run.*` - Acknowledged (future enhancement)
+    - `pull_request_review.*` - Updates PR data including behind_by and mergeable_state
+    - `check_run.*` - Updates PR data including behind_by and mergeable_state
+    - `check_suite.*` - Updates PR data including behind_by and mergeable_state
   - Security: Verifies GitHub webhook signatures using `GITHUB_WEBHOOK_SECRET`
 
 #### Setting Up GitHub Webhooks
