@@ -10,12 +10,16 @@ from datetime import datetime, timezone
 
 from utils import parse_pr_url, parse_repo_url
 from database import get_db, upsert_pr
-from github_api import fetch_pr_data, fetch_paginated_data, fetch_pr_timeline_data, build_pr_timeline
+from github_api import (
+    fetch_pr_data, fetch_paginated_data, fetch_pr_timeline_data, 
+    build_pr_timeline, fetch_with_headers
+)
 from analysis import analyze_review_progress, classify_review_health, calculate_pr_readiness
 from cache import (
     check_rate_limit, get_readiness_cache, set_readiness_cache, invalidate_readiness_cache,
     invalidate_timeline_cache, get_rate_limit_cache, get_rate_limit_cache_ttl,
-    get_readiness_rate_limit, get_readiness_rate_window, get_readiness_cache_ttl
+    set_rate_limit_cache, get_readiness_rate_limit, get_readiness_rate_window, 
+    get_readiness_cache_ttl
 )
 
 
@@ -363,20 +367,20 @@ async def handle_rate_limit(env):
             - reset: Unix timestamp when the limit resets
             - used: Number of requests used
     """
-    global _rate_limit_cache
-    
     try:
         # Check cache first to avoid excessive API calls
         # Use JavaScript Date API for Cloudflare Workers compatibility
         current_time = Date.now() / 1000  # Convert milliseconds to seconds
+        cache_data = get_rate_limit_cache()
+        cache_ttl = get_rate_limit_cache_ttl()
         
-        if _rate_limit_cache['data'] and (current_time - _rate_limit_cache['timestamp']) < _RATE_LIMIT_CACHE_TTL:
+        if cache_data['data'] and (current_time - cache_data['timestamp']) < cache_ttl:
             # Return cached data
             return Response.new(
-                json.dumps(_rate_limit_cache['data']), 
+                json.dumps(cache_data['data']), 
                 {'headers': {
                     'Content-Type': 'application/json',
-                    'Cache-Control': f'public, max-age={_RATE_LIMIT_CACHE_TTL}'
+                    'Cache-Control': f'public, max-age={cache_ttl}'
                 }}
             )
         
@@ -400,12 +404,11 @@ async def handle_rate_limit(env):
         }
         
         # Update cache
-        _rate_limit_cache['data'] = result
-        _rate_limit_cache['timestamp'] = current_time
+        set_rate_limit_cache(result)
         
         return Response.new(
             json.dumps(result), 
-            {'headers': {'Content-Type': 'application/json', 'Cache-Control': f'public, max-age={_RATE_LIMIT_CACHE_TTL}'}}
+            {'headers': {'Content-Type': 'application/json', 'Cache-Control': f'public, max-age={cache_ttl}'}}
         )
     except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
@@ -817,8 +820,8 @@ async def handle_pr_timeline(request, env, path):
                     'headers': {
                         'Content-Type': 'application/json',
                         'Retry-After': str(retry_after),
-                        'X-RateLimit-Limit': str(_READINESS_RATE_LIMIT),
-                        'X-RateLimit-Window': str(_READINESS_RATE_WINDOW)
+                        'X-RateLimit-Limit': str(get_readiness_rate_limit()),
+                        'X-RateLimit-Window': str(get_readiness_rate_window())
                     }
                 }
             )
@@ -902,8 +905,8 @@ async def handle_pr_review_analysis(request, env, path):
                     'headers': {
                         'Content-Type': 'application/json',
                         'Retry-After': str(retry_after),
-                        'X-RateLimit-Limit': str(_READINESS_RATE_LIMIT),
-                        'X-RateLimit-Window': str(_READINESS_RATE_WINDOW)
+                        'X-RateLimit-Limit': str(get_readiness_rate_limit()),
+                        'X-RateLimit-Window': str(get_readiness_rate_window())
                     }
                 }
             )
@@ -1004,8 +1007,8 @@ async def handle_pr_readiness(request, env, path):
                     'headers': {
                         'Content-Type': 'application/json',
                         'Retry-After': str(retry_after),
-                        'X-RateLimit-Limit': str(_READINESS_RATE_LIMIT),
-                        'X-RateLimit-Window': str(_READINESS_RATE_WINDOW)
+                        'X-RateLimit-Limit': str(get_readiness_rate_limit()),
+                        'X-RateLimit-Window': str(get_readiness_rate_window())
                     }
                 }
             )
@@ -1020,7 +1023,7 @@ async def handle_pr_readiness(request, env, path):
                     'headers': {
                         'Content-Type': 'application/json',
                         'X-Cache': 'HIT',
-                        'Cache-Control': f'private, max-age={_READINESS_CACHE_TTL}'
+                        'Cache-Control': f'private, max-age={get_readiness_cache_ttl()}'
                     }
                 }
             )
@@ -1102,7 +1105,7 @@ async def handle_pr_readiness(request, env, path):
                 'headers': {
                     'Content-Type': 'application/json',
                     'X-Cache': 'MISS',
-                    'Cache-Control': f'private, max-age={_READINESS_CACHE_TTL}'
+                    'Cache-Control': f'private, max-age={get_readiness_cache_ttl()}'
                 }
             }
         )
