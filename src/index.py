@@ -43,6 +43,12 @@ _timeline_cache = {
 # Cache TTL in seconds (30 minutes - timeline data changes less frequently)
 _TIMELINE_CACHE_TTL = 1800
 
+# HTTP Cache-Control TTL for browser caching
+# HTML pages: 5 minutes to balance freshness with performance
+_HTML_CACHE_TTL = 300
+# Static assets: 1 week (immutable assets like favicon, logo, etc.)
+_STATIC_ASSET_CACHE_TTL = 604800
+
 def parse_pr_url(pr_url):
     """
     Parse GitHub PR URL to extract owner, repo, and PR number.
@@ -2374,8 +2380,8 @@ async def on_fetch(request, env):
             response = await env.ASSETS.fetch(request)
             # Only add cache headers for successful responses
             if response.status == 200:
-                # Cache HTML for 5 minutes with revalidation for freshness
-                return await add_cache_headers(response, 'public, max-age=300, must-revalidate')
+                # Cache HTML with revalidation for freshness
+                return await add_cache_headers(response, f'public, max-age={_HTML_CACHE_TTL}, must-revalidate')
             return response
         # Fallback: return simple message
         return Response.new('Please configure assets in wrangler.toml', 
@@ -2434,8 +2440,8 @@ async def on_fetch(request, env):
             asset_response = await env.ASSETS.fetch(request)
             # Only add cache headers for successful responses
             if asset_response.status == 200:
-                # Cache static assets for 1 week as immutable
-                return await add_cache_headers(asset_response, 'public, max-age=604800, immutable')
+                # Cache static assets as immutable
+                return await add_cache_headers(asset_response, f'public, max-age={_STATIC_ASSET_CACHE_TTL}, immutable')
             return asset_response
         return Response.new('Not Found', {'status': 404, 'headers': cors_headers})
     
