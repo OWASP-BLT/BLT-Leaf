@@ -2316,6 +2316,28 @@ async def handle_pr_readiness(request, env, path):
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
+async def add_cache_headers(response, cache_control):
+    """
+    Helper function to clone a response and add Cache-Control headers.
+    
+    Args:
+        response: Original Response object
+        cache_control: Cache-Control header value to set
+        
+    Returns:
+        New Response with added Cache-Control header
+    """
+    new_response = Response.new(
+        await response.arrayBuffer(),
+        {
+            'status': response.status,
+            'statusText': response.statusText,
+            'headers': response.headers
+        }
+    )
+    new_response.headers.set('Cache-Control', cache_control)
+    return new_response
+
 async def on_fetch(request, env):
     """Main request handler"""
     url = URL.new(request.url)
@@ -2346,19 +2368,11 @@ async def on_fetch(request, env):
         if hasattr(env, 'ASSETS'): 
             # Fetch the HTML page from assets
             response = await env.ASSETS.fetch(request)
-            # Clone response to modify headers
-            new_response = Response.new(
-                await response.arrayBuffer(),
-                {
-                    'status': response.status,
-                    'statusText': response.statusText,
-                    'headers': response.headers
-                }
-            )
-            # Add Cache-Control header to enable browser caching
-            # Cache for 5 minutes (300 seconds) to balance freshness with performance
-            new_response.headers.set('Cache-Control', 'public, max-age=300, must-revalidate')
-            return new_response
+            # Only add cache headers for successful responses
+            if response.status == 200:
+                # Cache for 5 minutes (300 seconds) to balance freshness with performance
+                return await add_cache_headers(response, 'public, max-age=300, must-revalidate')
+            return response
         # Fallback: return simple message
         return Response.new('Please configure assets in wrangler.toml', 
                           {'status': 200, 'headers': {**cors_headers, 'Content-Type': 'text/html'}})
@@ -2414,22 +2428,10 @@ async def on_fetch(request, env):
         if hasattr(env, 'ASSETS'):
             # Fetch static asset
             asset_response = await env.ASSETS.fetch(request)
-            
-            # If it's a successful response for a static asset, add caching headers
+            # Only add cache headers for successful responses
             if asset_response.status == 200:
-                # Clone response to modify headers
-                new_response = Response.new(
-                    await asset_response.arrayBuffer(),
-                    {
-                        'status': asset_response.status,
-                        'statusText': asset_response.statusText,
-                        'headers': asset_response.headers
-                    }
-                )
-                # Add Cache-Control header for static assets
                 # Cache for 1 week (604800 seconds) for immutable assets like favicon, logo, etc.
-                new_response.headers.set('Cache-Control', 'public, max-age=604800, immutable')
-                return new_response
+                return await add_cache_headers(asset_response, 'public, max-age=604800, immutable')
             return asset_response
         return Response.new('Not Found', {'status': 404, 'headers': cors_headers})
     
