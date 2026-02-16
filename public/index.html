@@ -477,17 +477,36 @@
                 setRepoItemActiveState(li, currentRepo === li.dataset.repo);
 
                 li.innerHTML = `
-                    <div class="repo-name text-sm font-semibold text-slate-800 dark:text-slate-200">${repo.repo_owner}/${repo.repo_name}</div>
-                    <div class="repo-count mt-0.5 text-xs text-slate-500 dark:text-slate-400">${repo.pr_count} PR${repo.pr_count === 1 ? '' : 's'}</div>
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="flex-1 min-w-0 cursor-pointer" data-repo-clickable>
+                            <div class="repo-name text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">${repo.repo_owner}/${repo.repo_name}</div>
+                            <div class="repo-count mt-0.5 text-xs text-slate-500 dark:text-slate-400">${repo.pr_count} PR${repo.pr_count === 1 ? '' : 's'}</div>
+                        </div>
+                        <button 
+                            class="repo-refresh-btn flex-shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600 transition-colors"
+                            data-repo="${repo.repo_owner}/${repo.repo_name}"
+                            title="Refresh all PRs in this repository">
+                            <i class="fas fa-sync text-xs"></i>
+                        </button>
+                    </div>
                 `;
 
-                li.addEventListener('click', () => {
+                // Click handler for selecting repo
+                const clickableArea = li.querySelector('[data-repo-clickable]');
+                clickableArea.addEventListener('click', () => {
                     currentRepo = li.dataset.repo;
                     localStorage.setItem('currentRepo', currentRepo);
                     document.querySelectorAll('.repo-item').forEach(item => {
                         setRepoItemActiveState(item, item.dataset.repo === currentRepo);
                     });
                     loadPrs();
+                });
+
+                // Click handler for refresh button
+                const refreshBtn = li.querySelector('.repo-refresh-btn');
+                refreshBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation(); // Prevent repo selection
+                    await refreshRepoAllPRs(repo.repo_owner, repo.repo_name, refreshBtn);
                 });
 
                 repoList.appendChild(li);
