@@ -12,7 +12,7 @@ from utils import parse_pr_url, parse_repo_url
 from database import get_db, upsert_pr
 from github_api import (
     fetch_pr_data, fetch_paginated_data, fetch_pr_timeline_data, 
-    build_pr_timeline, fetch_with_headers
+    build_pr_timeline, fetch_with_headers, calculate_review_status
 )
 from analysis import analyze_review_progress, classify_review_health, calculate_pr_readiness
 from cache import (
@@ -1037,12 +1037,25 @@ async def handle_pr_readiness(request, env, path):
         
         pr = result.to_py()
         
+        # Save the current review_status from database for comparison later
+        original_review_status = pr.get('review_status', 'pending')
+        
         # Fetch timeline data from GitHub
         timeline_data = await fetch_pr_timeline_data(
             pr['repo_owner'],
             pr['repo_name'],
             pr['pr_number']
         )
+        
+        # Calculate and update review_status from timeline data
+        # This ensures the database has the latest review status without making duplicate API calls
+        review_status = calculate_review_status(timeline_data.get('reviews', []))
+        if review_status != original_review_status:
+            # Update review_status in database only if it actually changed
+            await db.prepare(
+                'UPDATE prs SET review_status = ? WHERE id = ?'
+            ).bind(review_status, pr_id).run()
+            pr['review_status'] = review_status
         
         # Build unified timeline
         timeline = build_pr_timeline(timeline_data)
