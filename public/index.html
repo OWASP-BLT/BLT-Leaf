@@ -49,13 +49,23 @@
             </div>
 
             <div class="flex flex-1 items-center justify-center px-4 md:px-8 lg:px-12">
-                <div class="relative w-full max-w-lg">
-                    <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                        <i class="fas fa-search text-slate-400"></i>
+                <div class="flex w-full max-w-lg gap-2">
+                    <div class="relative flex-1">
+                        <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                            <i class="fas fa-search text-slate-400"></i>
+                        </div>
+                        <input type="text" id="prSearchInput"
+                            class="block w-full rounded-md border border-[#e74c3c] bg-slate-50 py-2 pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-500 dark:border-[#e74c3c] dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-red-500 transition-colors shadow-sm"
+                            placeholder="Search PRs..." autocomplete="off">
                     </div>
-                    <input type="text" id="prSearchInput"
-                        class="block w-full rounded-md border border-[#e74c3c] bg-slate-50 py-2 pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-500 dark:border-[#e74c3c] dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-400 dark:focus:border-red-500 transition-colors shadow-sm"
-                        placeholder="Search PRs..." autocomplete="off">
+                    <button id="searchBtn" 
+                        class="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors shadow-sm whitespace-nowrap">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                    <button id="clearSearchBtn" 
+                        class="rounded-md bg-slate-500 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors shadow-sm whitespace-nowrap">
+                        <i class="fas fa-times"></i> Clear
+                    </button>
                 </div>
             </div>
 
@@ -336,86 +346,24 @@
         }
 
         function sortPrs(column, isShiftClick = false) {
-            // Handle shift+click for secondary sort
-            if (isShiftClick) {
-                if (secondarySortColumn === column) {
-                    // Toggle direction of secondary sort
-                    secondarySortDirection = secondarySortDirection === 'asc' ? 'desc' : 'asc';
-                } else {
-                    // Set as new secondary sort column
-                    secondarySortColumn = column;
-                    secondarySortDirection = 'desc';
-                }
+            // Note: Secondary sort (shift+click) is currently not supported for server-side sorting
+            // Regular click - set as primary sort
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
             } else {
-                // Regular click - set as primary sort
-                if (sortColumn === column) {
-                    sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-                } else {
-                    sortColumn = column;
-                    sortDirection = 'desc';
-                }
-                // If the new primary sort was the secondary sort, clear secondary
-                if (secondarySortColumn === column) {
-                    secondarySortColumn = null;
-                }
+                sortColumn = column;
+                sortDirection = 'desc';
             }
             
             // Save sorting state to localStorage
             localStorage.setItem('sortColumn', sortColumn);
             localStorage.setItem('sortDirection', sortDirection);
             
-            // Columns that should use numeric sorting
-            const numericColumns = ['files_changed', 'commits_count', 'behind_by', 'checks_passed', 'checks_failed', 'checks_skipped', 'pr_number', 'ready_score', 'ci_score', 'review_score', 'response_score', 'feedback_score', 'issues_count'];
-
-            allPrs.sort((a, b) => {
-                // Primary sort comparison
-                let aVal = a[sortColumn];
-                let bVal = b[sortColumn];
-                
-                // Handle numeric columns
-                if (numericColumns.includes(sortColumn)) {
-                    aVal = Number(aVal) || 0;
-                    bVal = Number(bVal) || 0;
-                }
-                // Handle string comparisons for all other columns 
-                else {
-                    aVal = String(aVal || '').toLowerCase();
-                    bVal = String(bVal || '').toLowerCase();
-                }
-                
-                let result;
-                if (sortDirection === 'asc') {
-                    result = aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
-                } else {
-                    result = aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
-                }
-                
-                // If primary sort values are equal and secondary sort is set, use secondary sort
-                if (result === 0 && secondarySortColumn) {
-                    let aSecVal = a[secondarySortColumn];
-                    let bSecVal = b[secondarySortColumn];
-                    
-                    if (numericColumns.includes(secondarySortColumn)) {
-                        aSecVal = Number(aSecVal) || 0;
-                        bSecVal = Number(bSecVal) || 0;
-                    } else {
-                        aSecVal = String(aSecVal || '').toLowerCase();
-                        bSecVal = String(bSecVal || '').toLowerCase();
-                    }
-                    
-                    if (secondarySortDirection === 'asc') {
-                        result = aSecVal > bSecVal ? 1 : aSecVal < bSecVal ? -1 : 0;
-                    } else {
-                        result = aSecVal < bSecVal ? 1 : aSecVal > bSecVal ? -1 : 0;
-                    }
-                }
-                
-                return result;
-            });
+            // Reset to first page when sorting changes
+            currentPage = 1;
             
-            // Re-apply filter after sorting
-            const searchTerm = document.getElementById('prSearchInput').value;
-            filterPrs(searchTerm);
+            // Reload PRs from server with new sort parameters
+            loadPrs();
         }
 
         function showInlineError(rowId, message) {
@@ -580,8 +528,14 @@
             }
 
             try {
-                const baseUrl = currentRepo === 'all' ? `/api/prs?page=${currentPage}`: `/api/prs?repo=${encodeURIComponent(currentRepo)}&page=${currentPage}`;
-                const url = baseUrl;
+                // Build URL with pagination and sorting parameters
+                let url;
+                if (currentRepo === 'all') {
+                    url = `/api/prs?page=${currentPage}&sort_by=${sortColumn}&sort_dir=${sortDirection}`;
+                } else {
+                    url = `/api/prs?repo=${encodeURIComponent(currentRepo)}&page=${currentPage}&sort_by=${sortColumn}&sort_dir=${sortDirection}`;
+                }
+                
                 const response = await fetch(url);
                 const data = await response.json();
 
@@ -598,7 +552,7 @@
                     }
                 }
 
-                // Attach readiness data from localStorage to each PR for sorting
+                // Attach readiness data from localStorage to each PR for display and computed columns
                 allPrs.forEach(pr => {
                     // First, try to get readiness data from database (if it exists)
                     if (pr.overall_score !== null && pr.overall_score !== undefined) {
@@ -631,26 +585,20 @@
                     }
                 });
                 
-                // Apply initial sort based on saved preferences or defaults
-                const numericColumns = ['files_changed', 'commits_count', 'behind_by', 'checks_passed', 'checks_failed', 'checks_skipped', 'pr_number', 'ready_score', 'ci_score', 'review_score', 'response_score', 'feedback_score', 'issues_count'];
-                allPrs.sort((a, b) => {
-                    let aVal = a[sortColumn];
-                    let bVal = b[sortColumn];
-                    
-                    if (numericColumns.includes(sortColumn)) {
-                        aVal = Number(aVal) || 0;
-                        bVal = Number(bVal) || 0;
-                    } else {
-                        aVal = String(aVal || '').toLowerCase();
-                        bVal = String(bVal || '').toLowerCase();
-                    }
-                    
-                    if (sortDirection === 'asc') {
-                        return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
-                    } else {
-                        return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
-                    }
-                });
+                // Only apply client-side sorting for computed columns (issues_count)
+                // All other columns are already sorted by the backend
+                if (sortColumn === 'issues_count') {
+                    allPrs.sort((a, b) => {
+                        let aVal = Number(a.issues_count) || 0;
+                        let bVal = Number(b.issues_count) || 0;
+                        
+                        if (sortDirection === 'asc') {
+                            return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+                        } else {
+                            return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+                        }
+                    });
+                }
                 
                 // Apply search filter if exists
                 const searchTerm = document.getElementById('prSearchInput').value;
@@ -1354,6 +1302,26 @@
         document.getElementById('prSearchInput').addEventListener('input', (e) => {
             currentPage = 1;
             filterPrs(e.target.value);
+        });
+
+        // Search button listener
+        document.getElementById('searchBtn').addEventListener('click', () => {
+            const searchTerm = document.getElementById('prSearchInput').value;
+            filterPrs(searchTerm);
+        });
+
+        // Clear button listener
+        document.getElementById('clearSearchBtn').addEventListener('click', () => {
+            document.getElementById('prSearchInput').value = '';
+            filterPrs('');
+        });
+
+        // Allow Enter key to trigger search
+        document.getElementById('prSearchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const searchTerm = document.getElementById('prSearchInput').value;
+                filterPrs(searchTerm);
+            }
         });
 
         document.getElementById('addPrBtn').addEventListener('click', addPr);
