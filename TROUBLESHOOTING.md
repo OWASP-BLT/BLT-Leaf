@@ -179,14 +179,14 @@ wrangler d1 list
 
 2. Create the database if missing:
 ```bash
-wrangler d1 create pr_tracker
+wrangler d1 create pr-tracker
 ```
 
 3. Update `wrangler.toml` with the correct database ID from the output.
 
 4. Initialize the schema:
 ```bash
-wrangler d1 execute pr_tracker --file=./schema.sql
+wrangler d1 execute pr-tracker --file=./schema.sql
 ```
 
 ---
@@ -259,7 +259,7 @@ SQLITE_ERROR: no such table: tracked_prs
 Initialize the database schema:
 
 ```bash
-wrangler d1 execute pr_tracker --file=./schema.sql
+wrangler d1 execute pr-tracker --file=./schema.sql
 ```
 
 ---
@@ -334,8 +334,8 @@ wrangler secret list
 
 # Database management
 wrangler d1 list
-wrangler d1 execute pr_tracker --file=./schema.sql
-wrangler d1 execute pr_tracker --command="SELECT * FROM tracked_prs"
+wrangler d1 execute pr-tracker --file=./schema.sql
+wrangler d1 execute pr-tracker --command="SELECT * FROM tracked_prs"
 ```
 
 ### Useful npm Scripts
