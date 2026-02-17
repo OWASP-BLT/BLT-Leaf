@@ -2166,6 +2166,9 @@ async def handle_github_webhook(request, env):
         # Get webhook secret from environment
         webhook_secret = getattr(env, 'GITHUB_WEBHOOK_SECRET', None)
         
+        # Get GitHub token from environment for API calls
+        github_token = getattr(env, 'GITHUB_TOKEN', None)
+        
         # Get raw request body for signature verification
         raw_body = await request.text()
         
@@ -2229,7 +2232,7 @@ async def handle_github_webhook(request, env):
                     )
                 
                 # Fetch fresh PR data and add to tracking
-                fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number)
+                fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number, github_token)
                 if fetched_pr_data:
                     await upsert_pr(db, pr_url, repo_owner, repo_name, pr_number, fetched_pr_data)
                     
@@ -2293,7 +2296,7 @@ async def handle_github_webhook(request, env):
             # Handle reopened PRs - re-add to tracking if it was tracked before
             elif action == 'reopened':
                 # Fetch fresh PR data
-                fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number)
+                fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number, github_token)
                 if fetched_pr_data:
                     await upsert_pr(db, pr_url, repo_owner, repo_name, pr_number, fetched_pr_data)
                     # Invalidate caches
@@ -2315,7 +2318,7 @@ async def handle_github_webhook(request, env):
             # Handle synchronized (new commits) or edited PRs - update data
             elif action in ['synchronize', 'edited']:
                 # Fetch fresh PR data
-                fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number)
+                fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number, github_token)
                 if fetched_pr_data:
                     await upsert_pr(db, pr_url, repo_owner, repo_name, pr_number, fetched_pr_data)
                     # Invalidate caches to force fresh analysis
@@ -2399,7 +2402,7 @@ async def handle_github_webhook(request, env):
                 
                 # Fetch fresh PR data to update behind_by and mergeable_state
                 try:
-                    fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number)
+                    fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number, github_token)
                     if fetched_pr_data:
                         await upsert_pr(db, pr_url, repo_owner, repo_name, pr_number, fetched_pr_data)
                         # Invalidate caches to force fresh analysis
