@@ -2120,8 +2120,7 @@ async def handle_add_pr(request, env):
                         db, pr_id, 'added', None,
                         f"PR #{item['number']} added to tracker"
                     )
-                    added_count += 1
-            
+                    added_count += 1            
             return Response.new(json.dumps({'success': True, 'message': f'Successfully imported {added_count} PRs'}), 
                               {'headers': {'Content-Type': 'application/json'}})
 
@@ -2156,8 +2155,7 @@ async def handle_add_pr(request, env):
                     db, pr_id, 'added', None,
                     f"PR #{parsed['pr_number']} added to tracker"
                 )
-            
-            # Include repo_owner, repo_name, pr_number, and pr_url in the response for frontend display
+                        # Include repo_owner, repo_name, pr_number, and pr_url in the response for frontend display
             response_data = {
                 **pr_data,
                 'repo_owner': parsed['owner'],
@@ -2461,12 +2459,11 @@ async def handle_refresh_pr(request, env):
         
         return Response.new(json.dumps({
             'success': True, 
-            'data': pr_data,
+            'data': {**pr_data, 'repo_owner': old_state['repo_owner'], 'repo_name': old_state['repo_name'], 'pr_number': old_state['pr_number'], 'pr_url': old_state['pr_url']},
             'refresh_count': refresh_count,
             'refreshed_by': username,
             'changes_detected': changes_detected
-        }), {'headers': {'Content-Type': 'application/json'}})
-    except Exception as e:
+        }), {'headers': {'Content-Type': 'application/json'}})    except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
@@ -3444,7 +3441,7 @@ async def on_fetch(request, env):
             response.headers.set(key, value)
         return response
     elif path == '/api/prs/updates' and request.method == 'GET':
-        response = await handle_pr_updates_check(env)
+        if path == '/api/prs/updates' and request.method == 'GET':        response = await handle_pr_updates_check(env)
     elif path == '/api/prs':
         if request.method == 'GET':
             repo = url.searchParams.get('repo')
