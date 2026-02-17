@@ -34,6 +34,7 @@ BLT-Leaf/
 ├── package.json        # npm scripts for deployment
 ├── DEPLOYMENT.md       # Detailed deployment instructions
 ├── CODE_SPLITTING_SUMMARY.md  # Documentation on code organization
+├── TROUBLESHOOTING.md  # Common issues and solutions
 └── README.md          # This file
 ```
 
@@ -113,12 +114,25 @@ wrangler d1 execute pr_tracker --file=./schema.sql
 
 ### Development
 
-Run the development server:
+#### Option 1: Remote Development (Recommended)
+For the most reliable development experience, use remote mode which runs on Cloudflare's infrastructure:
+
+```bash
+wrangler dev --remote
+```
+
+This requires being logged in to Cloudflare (`wrangler login`) but avoids local Python runtime issues.
+
+#### Option 2: Local Development
+Run the development server locally:
+
 ```bash
 wrangler dev
 ```
 
 The application will be available at `http://localhost:8787`
+
+**Note:** Local development with Python Workers requires downloading Pyodide dependencies on first run. If you encounter DNS lookup errors (e.g., `pyodide-capnp-bin.edgeworker.net`), this indicates network restrictions. Use remote mode (`--remote`) instead, or ensure you have unrestricted internet access.
 
 ### Deployment
 
@@ -485,6 +499,46 @@ When setting up the webhook in your GitHub repository, select the following even
 The webhook endpoint verifies GitHub's signature using HMAC SHA-256 to ensure requests are authentic. Always configure `GITHUB_WEBHOOK_SECRET` in production to prevent unauthorized access.
 
 **Development Mode:** If `GITHUB_WEBHOOK_SECRET` is not set, signature verification is skipped (use only for local testing).
+
+## Troubleshooting
+
+For detailed troubleshooting information, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+### Common Issues
+
+#### DNS Lookup Failed / Cannot Download Pyodide
+
+**Error:**
+```
+*** Fatal uncaught kj::Exception: DNS lookup failed.
+params.host = pyodide-capnp-bin.edgeworker.net
+```
+
+**Cause:** Python Workers use Pyodide (Python compiled to WebAssembly), which requires downloading runtime files on first run. This fails in restricted network environments (firewalls, CI/CD, corporate proxies).
+
+**Quick Fix - Use Remote Mode:**
+```bash
+wrangler login
+wrangler dev --remote
+```
+
+Or use the npm script:
+```bash
+npm run dev:remote
+```
+
+This runs your worker on Cloudflare's infrastructure with full Python support, bypassing local runtime download issues.
+
+**Other Solutions:** See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#dns-lookup-failed-when-running-wrangler-dev) for more options.
+
+#### GitHub API Rate Limits
+
+If you're hitting rate limits, configure a GitHub Personal Access Token:
+```bash
+wrangler secret put GITHUB_TOKEN
+```
+
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#github-api-rate-limit-exceeded) for detailed instructions.
 
 ## Contributing
 

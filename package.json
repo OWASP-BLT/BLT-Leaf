@@ -4,6 +4,7 @@
   "description": "PR Readiness Checker - Track and monitor GitHub Pull Request status",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:remote": "wrangler dev --remote",
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create pr-tracker",
     "db:init": "wrangler d1 execute pr-tracker --file=./schema.sql",
