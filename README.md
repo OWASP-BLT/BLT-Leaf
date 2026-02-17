@@ -39,6 +39,7 @@ BLT-Leaf/
 - 👥 **Multi-Repo Support**: Track PRs across multiple repositories
 - 🔄 **Real-time Updates**: Refresh PR data from GitHub API
 - 🎨 **Clean Interface**: Simple, GitHub-themed UI with dark mode support
+- 🔔 **Webhook Integration (NEW)**: Automatically track new PRs when opened via GitHub webhooks
 
 ### PR Readiness Analysis (NEW)
 - 🎯 **Readiness Scoring**: Data-driven 0-100 score combining CI confidence and review health
@@ -47,6 +48,7 @@ BLT-Leaf/
 - 📊 **Response Rate Analysis**: Measures how quickly and thoroughly authors address feedback
 - ⚠️ **Stale Feedback Detection**: Identifies unaddressed comments older than 3 days
 - 🚫 **Smart Blocker Detection**: Auto-identifies issues preventing merge (failing checks, merge conflicts, etc.)
+- 💬 **Conversation Tracking (NEW)**: Tracks unresolved review conversations; deducts 3 points per conversation from readiness score
 - 💡 **Actionable Recommendations**: Context-aware suggestions for next steps
 
 ### Performance & Protection
@@ -150,8 +152,12 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
    - Mergeable state
    - Files changed count
    - Check status (passed/failed/skipped)
+   - Open conversations count (unresolved review threads)
    - Last updated time
 3. **Sort PRs**: Click any column header to sort by that column
+   - Sorting works across all pages (server-side sorting)
+   - Click again to toggle ascending/descending order
+   - Sorting resets to page 1 for consistent results
 4. **Filter by Repo**: Click on a repository in the sidebar to filter PRs
 5. **Refresh Data**: Use the refresh button to update PR information from GitHub
    - Note: If a PR has been merged or closed since being added, it will be automatically removed from tracking.
@@ -184,13 +190,26 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
 ### Core Endpoints
 - `GET /` - Serves the HTML interface
 - `GET /api/repos` - List all repositories with open PRs
-- `GET /api/prs` - List all open PRs (optional `?repo=owner/name` filter)
+- `GET /api/prs` - List all open PRs with pagination and sorting
+  - Query parameters:
+    - `?repo=owner/name` - Filter by repository (optional)
+    - `?page=N` - Page number (default: 1)
+    - `?sort_by=column` - Sort column (default: `last_updated_at`)
+    - `?sort_dir=asc|desc` - Sort direction (default: `desc`)
+  - Supported sort columns: `title`, `author_login`, `pr_number`, `files_changed`, `checks_passed`, `checks_failed`, `checks_skipped`, `review_status`, `mergeable_state`, `commits_count`, `behind_by`, `ready_score`, `ci_score`, `review_score`, `response_score`, `feedback_score`, `last_updated_at`
 - `POST /api/prs` - Add a new PR (body: `{"pr_url": "..."}`)
   - Returns 400 error if PR is merged or closed
 - `POST /api/refresh` - Refresh a PR's data (body: `{"pr_id": 123}`)
   - Automatically removes PR if it has been merged or closed
 - `GET /api/rate-limit` - Check GitHub API rate limit status
 - `GET /api/status` - Check database configuration status
+
+### Webhook Endpoints
+- `POST /api/github/webhook` - Receive GitHub webhook events
+  - Automatically updates tracked PRs based on GitHub events
+  - Verifies signature using `GITHUB_WEBHOOK_SECRET`
+  - Fully supported: `pull_request` | Acknowledged: `pull_request_review`, `check_run`, `check_suite`
+  - See [Webhook Integration](#webhook-integration) section for setup details
 
 ### Analysis Endpoints (NEW)
 - `GET /api/prs/{id}/timeline` - Get complete PR event timeline
@@ -208,6 +227,40 @@ For detailed testing instructions and expected behavior, see [TESTING.md](TESTIN
   - Detects blockers (failing checks, conflicts, stale feedback)
   - Provides actionable recommendations
   - Returns merge-ready verdict with detailed breakdown
+
+### Webhook Endpoint (NEW)
+- `POST /api/github/webhook` - GitHub webhook integration for automatic PR tracking
+  - Automatically adds new PRs to tracking when they are opened
+  - Updates existing PRs when they are modified (synchronize, edited, reviews, checks)
+  - Removes PRs from tracking when they are closed or merged
+  - Supported webhook events:
+    - `pull_request.opened` - Automatically adds PR to tracking
+    - `pull_request.closed` - Removes PR from tracking
+    - `pull_request.reopened` - Re-adds PR to tracking
+    - `pull_request.synchronize` - Updates PR when new commits are pushed
+    - `pull_request.edited` - Updates PR when details change
+    - `pull_request_review.*` - Updates PR data including behind_by and mergeable_state
+    - `check_run.*` - Updates PR data including behind_by and mergeable_state
+    - `check_suite.*` - Updates PR data including behind_by and mergeable_state
+  - Security: Verifies GitHub webhook signatures using `GITHUB_WEBHOOK_SECRET`
+
+#### Setting Up GitHub Webhooks
+To enable automatic PR tracking:
+
+1. Go to your repository settings → Webhooks → Add webhook
+2. Set Payload URL to: `https://your-worker.workers.dev/api/github/webhook`
+3. Set Content type to: `application/json`
+4. Set Secret to a secure random string
+5. Select events to send:
+   - ✓ Pull requests
+   - ✓ Pull request reviews (optional)
+   - ✓ Check runs (optional)
+6. Add the webhook secret to your Cloudflare Worker environment:
+   ```bash
+   wrangler secret put GITHUB_WEBHOOK_SECRET
+   ```
+
+Once configured, new PRs will be automatically added to tracking when opened!
 
 ### Response Examples
 
@@ -299,8 +352,21 @@ CREATE TABLE prs (
 
 ### Overall Score Calculation
 ```
-Overall Score = (CI Confidence × 60%) + (Review Health × 40%)
+Base Score = (CI Confidence × 45%) + (Review Health × 55%)
+
+Apply Multipliers:
+- Draft PR: Score = 0
+- Merge Conflicts: Score × 0.67
+- Changes Requested: Score × 0.5
+
+Final Score = max(0, Score - (3 × open_conversations_count))
 ```
+
+### Conversation Score Impact (NEW)
+- **Open Conversations**: Unresolved review threads/conversations
+- **Score Deduction**: -3 points per unresolved conversation
+- **Detection**: Uses GitHub GraphQL API to fetch `reviewThreads` with `isResolved` status
+- **Minimum Score**: 0 (score cannot go negative)
 
 ### CI Confidence Score (0-100)
 - **All passing**: 100 points
@@ -331,11 +397,18 @@ The system tracks reviewer-author interaction cycles:
 - ❌ Stale unaddressed feedback (>3 days)
 - ❌ Awaiting author response to change requests
 
+### Warnings
+- ⚠️ Unresolved review conversations
+- ⚠️ Large PR (>30 files)
+- ⚠️ Skipped CI checks
+- ⚠️ No review activity yet
+
 ### Smart Recommendations
 Context-aware suggestions based on PR state:
 - Fix specific failing checks
 - Address reviewer comments
 - Resolve merge conflicts
+- Resolve open review conversations
 - Ping reviewers for approval
 - Split large PRs (>30 files)
 - Re-run flaky checks
@@ -345,6 +418,67 @@ Context-aware suggestions based on PR state:
 The application uses the GitHub REST API to fetch PR information. No authentication is required for public repositories, but rate limits apply (60 requests per hour for unauthenticated requests).
 
 For private repositories or higher rate limits, you can add a GitHub token to the worker environment variables.
+
+## Webhook Integration
+
+BLT-Leaf supports GitHub webhooks for automatic PR updates, eliminating the need for manual refreshes.
+
+### What is the Webhook?
+
+The webhook endpoint (`POST /api/github/webhook`) receives real-time notifications from GitHub when events occur on your tracked pull requests. This keeps your PR tracking data automatically synchronized with GitHub.
+
+### Which Events Would You Like to Trigger This Webhook?
+
+When setting up the webhook in your GitHub repository, select the following events:
+
+**Recommended Events:**
+- ✅ **Pull requests** - Automatically updates PR data when PRs are:
+  - `closed` - Removes closed/merged PRs from tracking
+  - `reopened` - Re-adds reopened PRs to tracking
+  - `synchronize` - Updates PR when new commits are pushed
+  - `edited` - Updates PR metadata (title, description, etc.)
+
+**Optional Events** (for future enhancements):
+- ⚪ **Pull request reviews** - Detects when reviews are submitted, edited, or dismissed
+- ⚪ **Check runs** - Monitors CI/CD check completions
+- ⚪ **Check suites** - Tracks overall check suite status
+
+> **Note:** Currently, only the `pull_request` event is fully processed. Other events are acknowledged but do not trigger updates yet.
+
+### Webhook Setup
+
+1. **Configure the webhook secret** (required for production):
+   ```bash
+   # Generate a secure random secret
+   openssl rand -hex 32
+   
+   # Add to your Cloudflare Worker secrets
+   wrangler secret put GITHUB_WEBHOOK_SECRET
+   # You will be prompted to paste the secret generated above
+   ```
+
+2. **Add the webhook to your GitHub repository:**
+   - Go to your repository settings → Webhooks → Add webhook
+   - **Payload URL**: `https://your-worker.workers.dev/api/github/webhook`
+   - **Content type**: `application/json`
+   - **Secret**: Enter the same secret you configured in step 1
+   - **Which events would you like to trigger this webhook?**
+     - Select "Let me select individual events"
+     - Check: ✅ Pull requests
+     - Optionally check: Pull request reviews, Check runs, Check suites
+   - **Active**: ✅ Checked
+   - Click "Add webhook"
+
+3. **Verify the webhook is working:**
+   - Make a change to a tracked PR (e.g., add a commit or close it)
+   - Check the webhook delivery logs in GitHub to ensure it was successfully delivered
+   - Verify that your PR tracker updates automatically
+
+### Security
+
+The webhook endpoint verifies GitHub's signature using HMAC SHA-256 to ensure requests are authentic. Always configure `GITHUB_WEBHOOK_SECRET` in production to prevent unauthorized access.
+
+**Development Mode:** If `GITHUB_WEBHOOK_SECRET` is not set, signature verification is skipped (use only for local testing).
 
 ## Contributing
 
