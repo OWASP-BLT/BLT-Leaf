@@ -1645,6 +1645,10 @@ async def handle_add_pr(request, env):
         # Capture token from header
         user_token = request.headers.get('x-github-token')
         
+        # Fallback to environment token if user doesn't provide one
+        if not user_token:
+            user_token = getattr(env, 'GITHUB_TOKEN', None)
+        
         # Type validation for pr_url
         if not pr_url or not isinstance(pr_url, str):
             return Response.new(
@@ -1905,6 +1909,10 @@ async def handle_refresh_pr(request, env):
         data = (await request.json()).to_py()
         pr_id = data.get('pr_id')
         user_token = request.headers.get('x-github-token')
+        
+        # Fallback to environment token if user doesn't provide one
+        if not user_token:
+            user_token = getattr(env, 'GITHUB_TOKEN', None)
         
         if not pr_id:
             return Response.new(json.dumps({'error': 'PR ID is required'}), 

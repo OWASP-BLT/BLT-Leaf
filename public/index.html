@@ -1664,11 +1664,11 @@
             
             if (isDark) {
                 document.documentElement.classList.remove('dark');
-                themeIcon.className = 'fas fa-moon';
+                themeIcon.className = 'fas fa-sun';
                 localStorage.setItem('theme', 'light');
             } else {
                 document.documentElement.classList.add('dark');
-                themeIcon.className = 'fas fa-sun';
+                themeIcon.className = 'fas fa-moon';
                 localStorage.setItem('theme', 'dark');
             }
         }
