@@ -18,8 +18,9 @@ _RATE_LIMIT_CACHE_TTL = 300
 _readiness_rate_limit = {
     # Structure: {'ip_address': {'count': int, 'window_start': float}}
 }
-# Rate limit: 10 requests per minute per IP for readiness endpoints
-_READINESS_RATE_LIMIT = 10
+# Rate limit: 30 requests per minute per IP for readiness endpoints
+# Increased from 10 to 30 to better support mobile users who may share IPs via carrier networks
+_READINESS_RATE_LIMIT = 30
 _READINESS_RATE_WINDOW = 60  # seconds
 
 # In-memory cache for readiness results

@@ -927,6 +927,11 @@
                     let errorMessage = 'Failed to load PRs';
                     if (response.status === 404) {
                         errorMessage = 'API endpoint not found. Please check your configuration.';
+                    } else if (response.status === 429) {
+                        const retryAfter = response.headers.get('Retry-After') || '60';
+                        errorMessage = `Rate limit exceeded. Please try again in ${retryAfter} seconds.`;
+                    } else if (response.status === 403) {
+                        errorMessage = 'Access forbidden. This may be due to rate limiting. Please try again in a moment.';
                     } else if (response.status === 500) {
                         errorMessage = 'Server error occurred. Please try again later.';
                     } else if (response.status === 503) {
@@ -1038,6 +1043,24 @@
 
             try {
                 const response = await fetch('/api/prs/updates');
+                
+                // Handle rate limiting and errors gracefully
+                if (!response.ok) {
+                    if (response.status === 429) {
+                        // Rate limited - log and skip this check
+                        const retryAfter = response.headers.get('Retry-After') || '60';
+                        console.warn(`Rate limited when checking for updates. Will retry after ${retryAfter}s`);
+                        return;
+                    } else if (response.status === 403) {
+                        // Forbidden - possibly rate limiting, log and skip
+                        console.warn('Access forbidden when checking for updates. Skipping this check.');
+                        return;
+                    }
+                    // For other errors, log but don't disrupt the user
+                    console.error(`Error checking for updates: HTTP ${response.status}`);
+                    return;
+                }
+                
                 const data = await response.json();
 
                 if (data.error) {
@@ -1740,6 +1763,19 @@
                     body: JSON.stringify({ pr_id: prId })
                 });
 
+                // Handle rate limiting and errors
+                if (!refreshResponse.ok) {
+                    let errorMsg = 'Failed to refresh PR';
+                    if (refreshResponse.status === 429) {
+                        const retryAfter = refreshResponse.headers.get('Retry-After') || '60';
+                        errorMsg = `Rate limit exceeded. Please try again in ${retryAfter} seconds.`;
+                    } else if (refreshResponse.status === 403) {
+                        errorMsg = 'Access forbidden. This may be due to GitHub rate limiting. Please try again in a moment.';
+                    }
+                    showInlineError(`pr-row-${prId}`, errorMsg);
+                    return;
+                }
+
                 const refreshData = await refreshResponse.json();
                 if (refreshData.error) {
                     showInlineError(`pr-row-${prId}`, refreshData.error);
@@ -1803,6 +1839,20 @@
 
                 // Step 2: Analyze readiness
                 const readinessResponse = await fetch(`/api/prs/${prId}/readiness`);
+                
+                // Handle rate limiting and errors
+                if (!readinessResponse.ok) {
+                    let errorMsg = 'Failed to fetch readiness data';
+                    if (readinessResponse.status === 429) {
+                        const retryAfter = readinessResponse.headers.get('Retry-After') || '60';
+                        errorMsg = `Rate limit exceeded. Please try again in ${retryAfter} seconds.`;
+                    } else if (readinessResponse.status === 403) {
+                        errorMsg = 'Access forbidden. This may be due to rate limiting. Please try again in a moment.';
+                    }
+                    showInlineError(`pr-row-${prId}`, errorMsg);
+                    return;
+                }
+                
                 const readinessData = await readinessResponse.json();
 
                 if (readinessData.error) {
