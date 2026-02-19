@@ -291,6 +291,101 @@
                 display: none;
             }
         }
+
+        /* Pac-Man countdown pie chart animation */
+        .pacman-container {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            position: relative;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+
+        .pacman-pie {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: conic-gradient(
+                #fbbf24 0deg,
+                #fbbf24 var(--progress, 360deg),
+                transparent var(--progress, 360deg)
+            );
+            animation: pacman-countdown 30s linear infinite;
+            position: relative;
+        }
+
+        .pacman-pie::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 60%;
+            height: 60%;
+            background: white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .dark .pacman-pie::before {
+            background: #1e293b;
+        }
+
+        .pacman-pie::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            right: 0;
+            width: 2px;
+            height: 2px;
+            background: #0f172a;
+            border-radius: 50%;
+            transform: translateY(-50%);
+        }
+
+        .dark .pacman-pie::after {
+            background: #f1f5f9;
+        }
+
+        @keyframes pacman-countdown {
+            0% {
+                --progress: 360deg;
+            }
+            100% {
+                --progress: 0deg;
+            }
+        }
+
+        /* Per-row refresh animation - overrides auto-refresh animation */
+        .pacman-refresh {
+            animation: pacman-refresh-countdown 3s linear forwards;
+        }
+
+        @keyframes pacman-refresh-countdown {
+            0% {
+                --progress: 360deg;
+            }
+            100% {
+                --progress: 0deg;
+            }
+        }
+
+        /* Button loading state - smooth transition */
+        .btn-loading {
+            position: relative;
+            pointer-events: none;
+        }
+
+        .btn-loading::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: inherit;
+        }
     </style>
 </head>
 
@@ -310,7 +405,9 @@
                         <button id="autoRefreshToggle"
                             class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
                             title="Toggle auto-refresh">
-                            <i class="fas fa-sync-alt text-xs" id="autoRefreshIcon"></i>
+                            <div class="pacman-container" id="autoRefreshIcon">
+                                <div class="pacman-pie"></div>
+                            </div>
                         </button>
                         <button id="themeToggle"
                             class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700">
@@ -396,7 +493,9 @@
                     <button id="autoRefreshToggle"
                         class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:text-slate-400 dark:hover:bg-slate-700 dark:focus:ring-slate-600 transition-colors"
                         title="Toggle auto-refresh">
-                        <i class="fas fa-sync-alt" id="autoRefreshIcon"></i>
+                        <div class="pacman-container" id="autoRefreshIcon">
+                            <div class="pacman-pie"></div>
+                        </div>
                     </button>
                     <button id="themeToggle"
                         class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:text-slate-400 dark:hover:bg-slate-700 dark:focus:ring-slate-600">
@@ -1378,7 +1477,7 @@
          */
         function updateAutoRefreshUI() {
             const buttons = document.querySelectorAll('#autoRefreshToggle');
-            const icons = document.querySelectorAll('#autoRefreshIcon');
+            const pacmanContainers = document.querySelectorAll('#autoRefreshIcon');
 
             if (autoRefreshEnabled) {
                 buttons.forEach(button => {
@@ -1386,8 +1485,12 @@
                     button.classList.remove('text-slate-500', 'dark:text-slate-400');
                     button.title = 'Auto-refresh enabled (click to disable)';
                 });
-                icons.forEach(icon => {
-                    icon.classList.add('fa-spin');
+                pacmanContainers.forEach(container => {
+                    // Enable the animation by removing paused style
+                    const pie = container.querySelector('.pacman-pie');
+                    if (pie) {
+                        pie.style.animationPlayState = 'running';
+                    }
                 });
             } else {
                 buttons.forEach(button => {
@@ -1395,8 +1498,12 @@
                     button.classList.add('text-slate-500', 'dark:text-slate-400');
                     button.title = 'Auto-refresh disabled (click to enable)';
                 });
-                icons.forEach(icon => {
-                    icon.classList.remove('fa-spin');
+                pacmanContainers.forEach(container => {
+                    // Pause the animation
+                    const pie = container.querySelector('.pacman-pie');
+                    if (pie) {
+                        pie.style.animationPlayState = 'paused';
+                    }
                 });
             }
         }
@@ -2015,10 +2122,11 @@
 
         async function updatePr(prId, button) {
             const originalHtml = button.innerHTML;
-
+            
+            // Show Pac-Man countdown in the button
             button.disabled = true;
-            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Updating...';
-            button.classList.add('opacity-70', 'cursor-not-allowed');
+            button.innerHTML = '<div class="pacman-container pacman-refresh" style="display: inline-block; width: 16px; height: 16px; margin-right: 4px;"><div class="pacman-pie"></div></div>Updating...';
+            button.classList.add('btn-loading');
 
             try {
                 // Step 1: Refresh PR data from GitHub
@@ -2032,6 +2140,9 @@
 
                 const refreshData = await refreshResponse.json();
                 if (refreshData.error) {
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('btn-loading');
                     showInlineError(`pr-row-${prId}`, refreshData.error);
                     return;
                 }
@@ -2079,23 +2190,24 @@
                     return;
                 }
 
-                // Update only this PR row with fresh data
-                updateSinglePrRow(prId, refreshData.data);
-                await loadRateLimit();
-
-                // Get the new button reference after row update
-                const updatedRow = document.getElementById(`pr-row-${prId}`);
-                const updatedButton = updatedRow ? updatedRow.querySelector('.update-btn') : null;
-                if (!updatedButton) {
-                    console.error('Could not find updated button');
-                    return;
+                // Update PR data in the array WITHOUT recreating the row
+                const prIndex = allPrs.findIndex(pr => pr.id === prId);
+                if (prIndex !== -1) {
+                    allPrs[prIndex] = { ...refreshData.data, id: prId };
                 }
 
-                // Step 2: Analyze readiness
+                // Update only the specific cells that changed, not the entire row
+                updatePrCellsInPlace(prId, refreshData.data);
+                await loadRateLimit();
+
+                // Step 2: Analyze readiness - do this BEFORE updating button state
                 const readinessResponse = await fetch(`/api/prs/${prId}/readiness`);
                 const readinessData = await readinessResponse.json();
 
                 if (readinessData.error) {
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.classList.remove('btn-loading');
                     showInlineError(`pr-row-${prId}`, readinessData.error);
                     return;
                 }
@@ -2109,12 +2221,98 @@
                 // Update all inline cells with readiness data
                 updateInlineCells(prId, readiness, reviewHealth);
 
-                updatedButton.innerHTML = '<i class="fas fa-check mr-1"></i>Updated';
-                updatedButton.disabled = false;
-                updatedButton.classList.remove('opacity-70', 'cursor-not-allowed');
+                // NOW update the button state - only after ALL data is loaded
+                button.innerHTML = '<i class="fas fa-check mr-1"></i>Updated';
+                button.disabled = false;
+                button.classList.remove('btn-loading');
             } catch (error) {
                 console.error('Error updating PR:', error);
+                button.innerHTML = originalHtml;
+                button.disabled = false;
+                button.classList.remove('btn-loading');
                 showInlineError(`pr-row-${prId}`, 'Failed to update PR');
+            }
+        }
+
+        /**
+         * Update specific PR cells in place without recreating the entire row
+         * This prevents other buttons from resetting their state
+         */
+        function updatePrCellsInPlace(prId, prData) {
+            const row = document.getElementById(`pr-row-${prId}`);
+            if (!row) return;
+
+            // Update title
+            const titleCell = row.querySelector('td:nth-child(2) a');
+            if (titleCell && prData.title) {
+                titleCell.textContent = prData.title;
+            }
+
+            // Update author
+            const authorCell = row.querySelector('td:nth-child(3)');
+            if (authorCell && prData.author_login) {
+                authorCell.innerHTML = `<span class="text-xs text-slate-700 dark:text-slate-300">${escapeHtml(prData.author_login)}</span>`;
+            }
+
+            // Update review status
+            const reviewCell = row.querySelector('td:nth-child(4)');
+            if (reviewCell && prData.review_status) {
+                const reviewStatusColors = {
+                    'APPROVED': 'bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400',
+                    'CHANGES_REQUESTED': 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400',
+                    'COMMENTED': 'bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400',
+                    'PENDING': 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400'
+                };
+                const colorClass = reviewStatusColors[prData.review_status] || 'bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+                reviewCell.innerHTML = `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}">${escapeHtml(prData.review_status || 'N/A')}</span>`;
+            }
+
+            // Update mergeable state
+            const mergeableCell = row.querySelector('td:nth-child(5)');
+            if (mergeableCell && prData.mergeable_state) {
+                const mergeableColors = {
+                    'clean': 'bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400',
+                    'unstable': 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400',
+                    'dirty': 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400',
+                    'unknown': 'bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                };
+                const colorClass = mergeableColors[prData.mergeable_state] || mergeableColors['unknown'];
+                mergeableCell.innerHTML = `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}">${escapeHtml(prData.mergeable_state || 'unknown')}</span>`;
+            }
+
+            // Update files changed
+            const filesCell = row.querySelector('td:nth-child(6)');
+            if (filesCell) {
+                filesCell.innerHTML = `<span class="text-xs text-slate-700 dark:text-slate-300">${prData.files_changed || 0}</span>`;
+            }
+
+            // Update checks
+            const checksCell = row.querySelector('td:nth-child(7)');
+            if (checksCell) {
+                const passed = prData.checks_passed || 0;
+                const failed = prData.checks_failed || 0;
+                const skipped = prData.checks_skipped || 0;
+                checksCell.innerHTML = `
+                    <div class="flex items-center gap-1 text-xs">
+                        <span class="text-green-600 dark:text-green-400">${passed}✓</span>
+                        <span class="text-red-600 dark:text-red-400">${failed}✗</span>
+                        <span class="text-slate-400">${skipped}⊘</span>
+                    </div>
+                `;
+            }
+
+            // Update conversations
+            const conversationsCell = row.querySelector('td:nth-child(8)');
+            if (conversationsCell) {
+                const conversations = prData.open_conversations_count || 0;
+                const colorClass = conversations > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500';
+                conversationsCell.innerHTML = `<span class="text-xs ${colorClass}">${conversations}</span>`;
+            }
+
+            // Update last updated time
+            const timeCell = row.querySelector('td:nth-last-child(2)');
+            if (timeCell && prData.last_updated_at) {
+                timeCell.innerHTML = `<span class="text-xs text-slate-600 dark:text-slate-400 truncate">${escapeHtml(timeAgo(prData.last_updated_at))}</span>`;
             }
         }
 
