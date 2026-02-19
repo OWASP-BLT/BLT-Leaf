@@ -1524,7 +1524,7 @@
                                 <th class="cursor-pointer px-2 py-2 text-center hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="ready" style="width:7%"><div class="flex items-center justify-center gap-1 truncate"><span class="truncate">Ready</span> ${getSortIcon('ready')}</div></th>
                                 <th class="cursor-pointer px-2 py-2 text-center hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="ready_score" style="width:7%"><div class="flex items-center justify-center gap-1 truncate"><span class="truncate">Score</span> ${getSortIcon('ready_score')}</div></th>
                                 <th class="cursor-pointer px-2 py-2 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="last_updated_at" style="width:8%"><div class="flex items-center gap-1 truncate"><span class="truncate">Updated</span> ${getSortIcon('last_updated_at')}</div></th>
-                                <th class="px-2 py-2 text-center whitespace-nowrap" style="width:120px">Action</th>
+                                <th class="px-2 py-2 text-center whitespace-nowrap" style="width:96px">Action</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-200 dark:divide-slate-700" id="prTableBody"></tbody>
@@ -1601,12 +1601,6 @@
                 btn.addEventListener('click', async (e) => {
                     const prId = e.currentTarget.dataset.prId;
                     await updatePr(prId, e.currentTarget);
-                });
-            });
-            document.querySelectorAll('.view-raw-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const prId = e.currentTarget.dataset.prId;
-                    showRawDataModal(prId);
                 });
             });
             adjustPrTableHeight();
@@ -1772,14 +1766,9 @@
                 </td>
                 <td class="px-2 py-1.5 text-xs text-slate-600 dark:text-slate-400 truncate">${escapeHtml(timeAgo(pr.last_updated_at))}</td>
                 <td class="px-2 py-1.5 text-center">
-                    <div class="flex items-center justify-center gap-1">
-                        <button class="update-btn rounded border border-[#E10000] bg-white px-2 py-1 text-xs font-semibold text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30" data-pr-id="${pr.id}" title="Update PR data and analyze readiness">
-                            <i class="fas fa-sync mr-1"></i>Update
-                        </button>
-                        <button class="view-raw-btn rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600" data-pr-id="${pr.id}" title="View raw PR data">
-                            <i class="fas fa-database"></i>
-                        </button>
-                    </div>
+                    <button class="update-btn rounded border border-[#E10000] bg-white px-2 py-1 text-xs font-semibold text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30" data-pr-id="${pr.id}" title="Update PR data and analyze readiness">
+                        <i class="fas fa-sync mr-1"></i>Update
+                    </button>
                 </td>
             `;
 
@@ -1821,14 +1810,6 @@
             if (updateBtn) {
                 updateBtn.addEventListener('click', async (e) => {
                     await updatePr(numericPrId, e.currentTarget);
-                });
-            }
-
-            // Re-attach the click event listener to the view raw button
-            const viewRawBtn = newRow.querySelector('.view-raw-btn');
-            if (viewRawBtn) {
-                viewRawBtn.addEventListener('click', (e) => {
-                    showRawDataModal(numericPrId);
                 });
             }
 
@@ -2526,83 +2507,6 @@
         });
 
         document.getElementById('closePanelBtn')?.addEventListener('click', closeDetailPanel);
-        
-        // Raw Data Modal event listeners
-        document.getElementById('closeRawDataModal')?.addEventListener('click', () => {
-            document.getElementById('rawDataModal').classList.add('hidden');
-        });
-        document.getElementById('closeRawDataModalBtn')?.addEventListener('click', () => {
-            document.getElementById('rawDataModal').classList.add('hidden');
-        });
-        document.getElementById('copyRawDataBtn')?.addEventListener('click', () => {
-            const content = document.getElementById('rawDataContent').textContent;
-            navigator.clipboard.writeText(content).then(() => {
-                const btn = document.getElementById('copyRawDataBtn');
-                const originalHtml = btn.innerHTML;
-                btn.innerHTML = '<i class="fas fa-check mr-1"></i>Copied!';
-                setTimeout(() => {
-                    btn.innerHTML = originalHtml;
-                }, 2000);
-            });
-        });
-        
-        // Show raw data modal function
-        function showRawDataModal(prId) {
-            const pr = allPrs.find(item => item.id === Number(prId));
-            if (!pr) return;
-            
-            const modal = document.getElementById('rawDataModal');
-            const content = document.getElementById('rawDataContent').querySelector('code');
-            
-            // Format PR data for display
-            const displayData = {
-                id: pr.id,
-                pr_number: pr.pr_number,
-                pr_url: pr.pr_url,
-                title: pr.title,
-                state: pr.state,
-                is_draft: pr.is_draft,
-                author: {
-                    login: pr.author_login,
-                    avatar: pr.author_avatar,
-                    url: pr.author_url
-                },
-                repository: {
-                    owner: pr.repo_owner,
-                    name: pr.repo_name,
-                    full_name: `${pr.repo_owner}/${pr.repo_name}`
-                },
-                review_status: pr.review_status,
-                reviewers: pr.reviewers ? JSON.parse(pr.reviewers) : [],
-                checks: {
-                    passed: pr.checks_passed,
-                    failed: pr.checks_failed
-                },
-                conversations: {
-                    open: pr.open_conversations_count
-                },
-                readiness: pr.overall_score !== null ? {
-                    overall_score: pr.overall_score,
-                    ci_score: pr.ci_score,
-                    review_score: pr.review_score,
-                    merge_ready: pr.merge_ready === 1,
-                    blockers: pr.blockers ? JSON.parse(pr.blockers) : [],
-                    warnings: pr.warnings ? JSON.parse(pr.warnings) : [],
-                    recommendations: pr.recommendations ? JSON.parse(pr.recommendations) : [],
-                    response_rate: pr.response_rate,
-                    stale_feedback: pr.stale_feedback ? JSON.parse(pr.stale_feedback) : []
-                } : null,
-                timestamps: {
-                    created_at: pr.created_at,
-                    last_updated_at: pr.last_updated_at,
-                    last_refreshed_at: pr.last_refreshed_at
-                }
-            };
-            
-            content.textContent = JSON.stringify(displayData, null, 2);
-            modal.classList.remove('hidden');
-        }
-        
         window.addEventListener('resize', () => {
             updatePanelTopOffset();
             updateMainContentHeight();
