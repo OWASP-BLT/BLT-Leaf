@@ -2125,7 +2125,8 @@
             
             // Show Pac-Man countdown in the button
             button.disabled = true;
-            button.innerHTML = '<div class="pacman-container pacman-refresh" style="display: inline-block; width: 16px; height: 16px; margin-right: 4px;"><div class="pacman-pie"></div></div>Updating...';
+            button.setAttribute('aria-busy', 'true');
+            button.innerHTML = '<div class="pacman-container pacman-refresh"><div class="pacman-pie"></div></div>Updating...';
             button.classList.add('btn-loading');
 
             try {
@@ -2142,6 +2143,7 @@
                 if (refreshData.error) {
                     button.innerHTML = originalHtml;
                     button.disabled = false;
+                    button.removeAttribute('aria-busy');
                     button.classList.remove('btn-loading');
                     showInlineError(`pr-row-${prId}`, refreshData.error);
                     return;
@@ -2207,6 +2209,7 @@
                 if (readinessData.error) {
                     button.innerHTML = originalHtml;
                     button.disabled = false;
+                    button.removeAttribute('aria-busy');
                     button.classList.remove('btn-loading');
                     showInlineError(`pr-row-${prId}`, readinessData.error);
                     return;
@@ -2224,11 +2227,13 @@
                 // NOW update the button state - only after ALL data is loaded
                 button.innerHTML = '<i class="fas fa-check mr-1"></i>Updated';
                 button.disabled = false;
+                button.removeAttribute('aria-busy');
                 button.classList.remove('btn-loading');
             } catch (error) {
                 console.error('Error updating PR:', error);
                 button.innerHTML = originalHtml;
                 button.disabled = false;
+                button.removeAttribute('aria-busy');
                 button.classList.remove('btn-loading');
                 showInlineError(`pr-row-${prId}`, 'Failed to update PR');
             }
