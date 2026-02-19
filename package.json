@@ -9,8 +9,9 @@
     "db:init": "wrangler d1 execute pr-tracker --file=./schema.sql",
     "lint": "echo 'Linting not configured yet' && exit 0",
     "format:check": "echo 'Format checking not configured yet' && exit 0",
-    "test": "node test-data-display.js",
-    "test:data-display": "node test-data-display.js"
+    "test": "node test-data-display.js && node test-rate-limiting.js",
+    "test:data-display": "node test-data-display.js",
+    "test:rate-limiting": "node test-rate-limiting.js"
   },
   "keywords": [
     "github",
