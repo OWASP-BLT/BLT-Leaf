@@ -125,8 +125,8 @@ Consider these additional enhancements:
 5. **Per-Endpoint Limits**: Different rate limits for different endpoints based on usage patterns
 
 ## References
-- Issue: #403-error-on-mobile
-- PR: copilot/fix-403-error-mobile
+- Issue: 403 error on mobile (from issue tracker)
+- PR: This pull request addresses the mobile 403 error issue
 - Related Files:
   - `src/cache.py` - Rate limit configuration
   - `src/handlers.py` - Rate limit enforcement

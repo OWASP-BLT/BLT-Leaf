@@ -292,7 +292,10 @@ function testCORSConfiguration() {
   }
 }
 
-// Run all tests
+/**
+ * Executes all test suites and outputs results.
+ * Exits with code 1 if any tests fail, 0 if all pass.
+ */
 function runAllTests() {
   log('\n' + '='.repeat(60), colors.blue);
   log('  BLT-Leaf Rate Limiting and Mobile Support Tests', colors.blue);
