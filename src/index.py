@@ -2463,7 +2463,8 @@ async def handle_refresh_pr(request, env):
             'refresh_count': refresh_count,
             'refreshed_by': username,
             'changes_detected': changes_detected
-        }), {'headers': {'Content-Type': 'application/json'}})    except Exception as e:
+        }), {'headers': {'Content-Type': 'application/json'}})
+    except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
@@ -2509,7 +2510,7 @@ async def handle_get_pr_history(env, pr_id):
         
         return Response.new(json.dumps({'success': True, 'data': response_data}), 
                           {'headers': {'Content-Type': 'application/json'}})
-        except Exception as e:
+    except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
@@ -3441,7 +3442,7 @@ async def on_fetch(request, env):
             response.headers.set(key, value)
         return response
     elif path == '/api/prs/updates' and request.method == 'GET':
-        if path == '/api/prs/updates' and request.method == 'GET':        response = await handle_pr_updates_check(env)
+        response = await handle_pr_updates_check(env)
     elif path == '/api/prs':
         if request.method == 'GET':
             repo = url.searchParams.get('repo')
