@@ -39,7 +39,7 @@
         #mainContentArea {
             overflow: hidden;
             min-height: 0;
-            height: auto;
+            height: calc(100vh - var(--workspace-top-offset, 64px));
         }
 
         #analysisLayout {
@@ -49,6 +49,7 @@
             min-height: 0;
             flex: 1;
             overflow: hidden;
+            height: 100%;
         }
 
         #prListPane {
@@ -66,11 +67,13 @@
             border: 1px solid #e2e8f0;
             border-radius: 12px;
             min-height: 220px;
-            max-height: calc(100vh - var(--panel-top-offset, 64px) - 16px);
+            height: 100%;
+            max-height: none;
+            box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.18);
         }
 
         .dark #prDetailPanel {
-            background: #0f172a;
+            background: rgba(30, 41, 59, 0.4);
             border-color: #334155;
         }
 
@@ -89,12 +92,16 @@
 
         .panel-body {
             flex: 1;
-            overflow-y: auto;
+            overflow: hidden;
             padding: 12px;
         }
 
         #repoSidebar {
             overflow-y: auto;
+        }
+
+        #sidebarBackdrop {
+            display: none;
         }
 
         #mainColumn {
@@ -109,13 +116,15 @@
             display: flex;
             flex-direction: column;
             min-height: 0;
+            flex: 1;
+            height: 100%;
         }
 
         .pr-table-scroll {
             overflow-y: auto;
             flex: 1;
             min-height: 0;
-            max-height: 60vh;
+            max-height: none;
         }
 
         .pr-row-select {
@@ -168,18 +177,76 @@
             #analysisLayout {
                 display: grid;
                 grid-template-columns: minmax(0, 1fr) 360px;
-                align-items: start;
+                align-items: stretch;
                 min-height: 0;
+            }
+
+            #repoSidebar {
+                transition: width 0.2s ease, min-width 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+            }
+
+            body.desktop-sidebar-collapsed #repoSidebar {
+                width: 0 !important;
+                min-width: 0 !important;
+                border-right-width: 0;
+                transform: translateX(-100%);
+                opacity: 0;
+                overflow: hidden;
+                pointer-events: none;
             }
 
             #prDetailPanel {
                 position: sticky;
                 top: var(--panel-top-offset, 64px);
                 align-self: start;
+                border-left: 1px solid #334155;
             }
 
             #closePanelBtn {
                 display: none;
+            }
+        }
+
+        @media (max-width: 1023px) {
+            #sidebarBackdrop {
+                display: block;
+                position: fixed;
+                top: var(--sidebar-top-offset, 0px);
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(15, 23, 42, 0.6);
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.2s ease;
+                z-index: 35;
+            }
+
+            #repoSidebar {
+                position: fixed;
+                top: var(--sidebar-top-offset, 0px);
+                left: 0;
+                bottom: 0;
+                width: min(86vw, 320px);
+                border-right: 1px solid #334155;
+                border-bottom: 0;
+                transform: translateX(-100%);
+                transition: transform 0.22s ease;
+                z-index: 40;
+                box-shadow: 0 16px 40px rgba(15, 23, 42, 0.35);
+            }
+
+            body.sidebar-open #repoSidebar {
+                transform: translateX(0);
+            }
+
+            body.sidebar-open #sidebarBackdrop {
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+            body.sidebar-open {
+                overflow: hidden;
             }
         }
 
@@ -427,11 +494,19 @@
     </style>
 </head>
 
-<body class="flex min-h-screen flex-col overflow-y-auto bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
+<body class="flex h-screen flex-col overflow-hidden bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
     <header class="sticky top-0 z-30 border-b border-slate-200 bg-white px-5 dark:border-slate-700 dark:bg-slate-800">
-        <div class="mx-auto flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
+        <div class="mx-auto flex h-14 items-center justify-between px-4 sm:px-6 lg:px-8">
 
             <div class="flex items-center gap-4 lg:gap-6">
+                <button id="sidebarToggleBtn"
+                    class="inline-flex rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:text-slate-400 dark:hover:bg-slate-700 dark:focus:ring-slate-600"
+                    title="Toggle repositories panel"
+                    aria-label="Toggle repositories panel"
+                    aria-controls="repoSidebar"
+                    aria-expanded="true">
+                    <i class="fas fa-bars"></i>
+                </button>
                 <a href="/" class="flex shrink-0 items-center gap-2 hover:opacity-80 transition-opacity">
                     <img width="28" src="./static/logo.png" alt="Logo" onerror="this.style.display='none'" />
                     <h1 class="hidden font-bold text-slate-900 dark:text-white sm:block">BLT-LEAF</h1>
@@ -499,7 +574,7 @@
     <div class="bg-gradient-to-r from-red-50 to-orange-50 
             border-b border-red-100
             dark:bg-slate-200 dark:border-slate-300">
-    <div class="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-5">
+    <div class="mx-auto max-w-7xl px-4 py-3 sm:px-6 sm:py-4">
         <p class="text-sm text-slate-700 leading-relaxed sm:text-base 
                   dark:text-black">
 
@@ -510,6 +585,8 @@
             </p>
         </div>
     </div>
+
+    <div id="sidebarBackdrop" aria-hidden="true"></div>
 
     <div id="mainContentArea" class="mx-auto flex min-h-0 w-full flex-1 flex-col md:flex-row">
         <aside id="repoSidebar"
@@ -529,14 +606,14 @@
             </div>
         </aside>
 
-        <main id="mainColumn" class="min-h-0 flex-1 overflow-hidden p-4 sm:p-6">
-            <section class="mb-6 space-y-3">
+        <main id="mainColumn" class="min-h-0 flex-1 overflow-hidden p-3 sm:p-4">
+            <section class="mb-4 space-y-2">
                 <div class="flex w-full max-w-4xl flex-col gap-2 sm:flex-row">
                     <input type="text" id="prUrlInput"
-                        class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-2 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-red-900/50"
+                        class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-2 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-red-900/50"
                         placeholder="Enter GitHub PR URL or Repository URL" autocomplete="off" />
                     <button id="addPrBtn"
-                        class="btn-fallback w-[6rem] rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-[#BC0000] disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-200 disabled:text-red-700 dark:disabled:border-red-800 dark:disabled:bg-red-950 dark:disabled:text-red-400">
+                        class="btn-fallback w-[6rem] rounded-lg px-4 py-2 text-sm font-semibold transition-colors hover:bg-[#BC0000] disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-200 disabled:text-red-700 dark:disabled:border-red-800 dark:disabled:bg-red-950 dark:disabled:text-red-400">
                         Add PR
                     </button>
                 </div>
@@ -582,21 +659,6 @@
         </main>
     </div>
 
-    <footer class="bg-slate-900 px-6 py-6 text-slate-200">
-        <div class="mx-auto max-w-7xl space-y-3 text-sm leading-relaxed">
-            <p>
-                Leaf is a Readiness and Security PR checker. It reviews pull requests for operational readiness, security risks, and production-impacting changes before they ship. Inspired by the surge of AI-generated PRs, Leaf helps teams maintain high standards by adding an automated layer of critical thinking and risk detection to every change.
-            </p>
-            <p class="flex items-center gap-2 font-semibold text-slate-100">
-                <i class="fas fa-lock text-amber-400"></i>
-                Security features are coming soon!
-            </p>
-            <p class="text-slate-300">
-                Part of the <span class="text-red-400">OWASP Bug Logging Tool (BLT)</span> project
-            </p>
-        </div>
-    </footer>
-
     <div id="rawDataModal" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
         <div class="relative flex h-full w-full items-center justify-center p-4">
@@ -608,7 +670,7 @@
                     </button>
                 </div>
                 <div class="px-4 py-3">
-                    <pre id="rawDataContent" class="max-h-[70vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><code class="language-json"></code></pre>
+                    <pre id="rawDataContent" class="max-h-[70vh] overflow-x-auto overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><code class="language-json"></code></pre>
                 </div>
                 <div class="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700">
                     <button id="copyRawDataBtn" class="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">
@@ -677,6 +739,7 @@
         let autoRefreshEnabled = localStorage.getItem('autoRefreshEnabled') !== 'false'; // enabled by default
         let autoRefreshInterval = null;
         let prUpdateTimestamps = {}; // Track PR update timestamps for change detection
+        let sidebarLastFocusedEl = null;
         const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
         function getPrListScrollElement() {
             const tableScroll = document.querySelector('#prListContainer .pr-table-scroll');
@@ -696,6 +759,73 @@
             document.documentElement.style.setProperty('--panel-top-offset', `${headerHeight}px`);
         }
 
+        function updateSidebarTopOffset() {
+            const mainContentEl = document.getElementById('mainContentArea');
+            const topOffset = mainContentEl ? Math.max(0, Math.round(mainContentEl.getBoundingClientRect().top)) : 0;
+            document.documentElement.style.setProperty('--sidebar-top-offset', `${topOffset}px`);
+        }
+
+        function isMobileSidebarViewport() {
+            return window.matchMedia('(max-width: 1023px)').matches;
+        }
+
+        function isSidebarOpen() {
+            if (isMobileSidebarViewport()) {
+                return document.body.classList.contains('sidebar-open');
+            }
+            return !document.body.classList.contains('desktop-sidebar-collapsed');
+        }
+
+        function setSidebarToggleState(isOpen) {
+            const toggleBtn = document.getElementById('sidebarToggleBtn');
+            if (!toggleBtn) return;
+            toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            const icon = toggleBtn.querySelector('i');
+            if (icon) {
+                icon.className = isOpen ? 'fas fa-times' : 'fas fa-bars';
+            }
+        }
+
+        function openSidebar() {
+            sidebarLastFocusedEl = document.activeElement;
+            if (isMobileSidebarViewport()) {
+                document.body.classList.add('sidebar-open');
+            } else {
+                document.body.classList.remove('desktop-sidebar-collapsed');
+            }
+            setSidebarToggleState(true);
+        }
+
+        function closeSidebar(restoreFocus = false) {
+            if (isMobileSidebarViewport()) {
+                document.body.classList.remove('sidebar-open');
+            } else {
+                document.body.classList.add('desktop-sidebar-collapsed');
+            }
+            setSidebarToggleState(isSidebarOpen());
+            if (restoreFocus && sidebarLastFocusedEl && typeof sidebarLastFocusedEl.focus === 'function') {
+                sidebarLastFocusedEl.focus();
+            }
+            sidebarLastFocusedEl = null;
+        }
+
+        function toggleSidebar() {
+            if (isSidebarOpen()) {
+                closeSidebar(true);
+            } else {
+                openSidebar();
+            }
+        }
+
+        function syncSidebarWithViewport() {
+            if (isMobileSidebarViewport()) {
+                document.body.classList.remove('desktop-sidebar-collapsed');
+            } else {
+                document.body.classList.remove('sidebar-open');
+            }
+            setSidebarToggleState(isSidebarOpen());
+        }
+
         function updateMainContentHeight() {
             const mainContentEl = document.getElementById('mainContentArea');
             if (!mainContentEl) return;
@@ -703,26 +833,16 @@
             const topOffset = Math.max(0, Math.round(mainContentEl.getBoundingClientRect().top));
             const availableHeight = Math.max(260, window.innerHeight - topOffset);
             const heightPx = `${availableHeight}px`;
-            mainContentEl.style.minHeight = heightPx;
+            document.documentElement.style.setProperty('--workspace-top-offset', `${topOffset}px`);
+            mainContentEl.style.height = heightPx;
+            mainContentEl.style.minHeight = '0';
         }
 
         function adjustPrTableHeight() {
-            const listPane = document.getElementById('prListPane');
             const listContainer = document.getElementById('prListContainer');
             const tableScroll = listContainer?.querySelector('.pr-table-scroll');
-            if (!listPane || !listContainer || !tableScroll) return;
-
-            const paneRect = listPane.getBoundingClientRect();
-            const tableRect = tableScroll.getBoundingClientRect();
-            const paginationEl = listContainer.querySelector('.pagination-wrapper');
-            const paginationReserve = paginationEl ? (paginationEl.offsetHeight + 16) : 12;
-            const availablePx = Math.floor(paneRect.bottom - tableRect.top - paginationReserve - 8);
-
-            if (availablePx > 220) {
-                tableScroll.style.maxHeight = `${availablePx}px`;
-            } else {
-                tableScroll.style.maxHeight = '60vh';
-            }
+            if (!listContainer || !tableScroll) return;
+            tableScroll.style.maxHeight = 'none';
         }
 
         // Helper functions for readiness data persistence
@@ -1180,6 +1300,7 @@
                     document.querySelectorAll('.repo-item').forEach(item => {
                         setRepoItemActiveState(item, item.dataset.repo === currentRepo);
                     });
+                    if (isMobileSidebarViewport()) closeSidebar();
                     loadPrs();
                 });
 
@@ -1538,7 +1659,7 @@
             };
 
             container.innerHTML = `
-                <div class="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 dark:border-slate-700 dark:bg-slate-800">
+                <div class="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1 dark:border-slate-700 dark:bg-slate-800">
                     <div class="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Filters</div>
                     <button class="filter-chip ${activeStateFilter === 'all' ? 'active' : ''}" data-filter-type="state" data-filter-value="all">All</button>
                     <button class="filter-chip ${activeStateFilter === 'open' ? 'active' : ''}" data-filter-type="state" data-filter-value="open">Open</button>
@@ -1558,23 +1679,26 @@
                         <span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">${prs.length} PR${prs.length === 1 ? '' : 's'}</span>
                     </div>
                 </div>
-                <div class="pr-table-scroll overflow-x-auto overflow-y-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-                    <table class="w-full table-fixed min-w-[780px] text-left text-sm">
-                        <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-                            <tr>
-                                <th class="cursor-pointer px-1.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="author_login" style="width:10%"><div class="flex items-center gap-1 truncate"><span class="truncate">Author</span> ${getSortIcon('author_login')}</div></th>
-                                <th class="cursor-pointer px-1.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="title" style="width:25%"><div class="flex items-center gap-1 truncate"><span class="truncate">PR</span> ${getSortIcon('title')}</div></th>
-                                <th class="cursor-pointer px-1.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="repo_owner" style="width:12%"><div class="flex items-center gap-1 truncate"><span class="truncate">Repo</span> ${getSortIcon('repo_owner')}</div></th>
-                                <th class="cursor-pointer px-1.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="review_status" style="width:9%"><div class="flex items-center gap-1 truncate"><span class="truncate">Review</span> ${getSortIcon('review_status')}</div></th>
-                                <th class="cursor-pointer px-1.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="checks_passed" style="width:11%"><div class="flex items-center gap-1 truncate"><span class="truncate">Health</span> ${getSortIcon('checks_passed')}</div></th>
-                                <th class="cursor-pointer px-1.5 py-2 text-center hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="ready" style="width:6%"><div class="flex items-center justify-center gap-1 truncate"><span class="truncate">Ready</span> ${getSortIcon('ready')}</div></th>
-                                <th class="cursor-pointer px-1.5 py-2 text-center hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="ready_score" style="width:6%"><div class="flex items-center justify-center gap-1 truncate"><span class="truncate">Score</span> ${getSortIcon('ready_score')}</div></th>
-                                <th class="cursor-pointer px-1.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="last_updated_at" style="width:7%"><div class="flex items-center gap-1 truncate"><span class="truncate">Updated</span> ${getSortIcon('last_updated_at')}</div></th>
-                                <th class="px-1.5 py-2 text-center whitespace-nowrap" style="width:96px">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-200 dark:divide-slate-700" id="prTableBody"></tbody>
-                    </table>
+                <div class="flex h-full min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+                    <div class="pr-table-scroll h-full min-h-0 flex-1 overflow-x-auto overflow-y-auto">
+                        <table class="w-full table-fixed min-w-[780px] text-left text-sm">
+                            <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                                <tr>
+                                    <th class="cursor-pointer px-1.5 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="author_login" style="width:10%"><div class="flex items-center gap-1 truncate"><span class="truncate">Author</span> ${getSortIcon('author_login')}</div></th>
+                                    <th class="cursor-pointer px-1.5 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="title" style="width:25%"><div class="flex items-center gap-1 truncate"><span class="truncate">PR</span> ${getSortIcon('title')}</div></th>
+                                    <th class="cursor-pointer px-1.5 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="repo_owner" style="width:12%"><div class="flex items-center gap-1 truncate"><span class="truncate">Repo</span> ${getSortIcon('repo_owner')}</div></th>
+                                    <th class="cursor-pointer px-1.5 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="review_status" style="width:9%"><div class="flex items-center gap-1 truncate"><span class="truncate">Review</span> ${getSortIcon('review_status')}</div></th>
+                                    <th class="cursor-pointer px-1.5 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="checks_passed" style="width:11%"><div class="flex items-center gap-1 truncate"><span class="truncate">Health</span> ${getSortIcon('checks_passed')}</div></th>
+                                    <th class="cursor-pointer px-1.5 py-2.5 text-center hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="ready" style="width:6%"><div class="flex items-center justify-center gap-1 truncate"><span class="truncate">Ready</span> ${getSortIcon('ready')}</div></th>
+                                    <th class="cursor-pointer px-1.5 py-2.5 text-center hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="ready_score" style="width:6%"><div class="flex items-center justify-center gap-1 truncate"><span class="truncate">Score</span> ${getSortIcon('ready_score')}</div></th>
+                                    <th class="cursor-pointer px-1.5 py-2.5 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="last_updated_at" style="width:7%"><div class="flex items-center gap-1 truncate"><span class="truncate">Updated</span> ${getSortIcon('last_updated_at')}</div></th>
+                                    <th class="px-1.5 py-2.5 text-center whitespace-nowrap" style="width:96px">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-200 dark:divide-slate-700" id="prTableBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="paginationMount" class="pagination-wrapper flex items-center justify-between shrink-0 border-t border-slate-700 bg-slate-900/40 px-4 py-3"></div>
                 </div>
             `;
 
@@ -1657,29 +1781,26 @@
             });
             adjustPrTableHeight();
             
-            // Keep pagination visible whenever backend paging is active (except live search mode).
-            const hasSearch = document.getElementById('prSearchInput').value.trim() !== '';
-            const shouldShowPagination = !hasSearch && totalPages > 0;
-            
-            if (shouldShowPagination) {
-                renderPagination();
-            }
+            renderPagination(true);
             if (listScrollContainer) {
                 listScrollContainer.scrollTop = previousMainScrollTop;
             }
         }
 
-        function renderPagination() {
+        function renderPagination(showPagination = true) {
             const container = document.getElementById('prListContainer');
+            const paginationMount = document.getElementById('paginationMount');
+            if (!container || !paginationMount) return;
 
-            // Remove existing pagination if present
-            const existing = container.querySelector('.pagination-wrapper');
-            if (existing) existing.remove();
+            if (!showPagination) {
+                paginationMount.innerHTML = '';
+                paginationMount.classList.add('hidden');
+                return;
+            }
 
-            const paginationDiv = document.createElement('div');
-            paginationDiv.className = 'pagination-wrapper flex items-center justify-between mt-4';
+            paginationMount.classList.remove('hidden');
 
-            paginationDiv.innerHTML = `
+            paginationMount.innerHTML = `
                 <div class="flex items-center gap-4">
                     <div class="text-sm text-slate-600 dark:text-slate-400">
                         Page <span class="font-semibold">${currentPage}</span> of <span class="font-semibold">${totalPages}</span>
@@ -1723,7 +1844,6 @@
             </div>
         `;
 
-            container.appendChild(paginationDiv);
             adjustPrTableHeight();
 
             document.getElementById('prevPageBtn')?.addEventListener('click', () => {
@@ -1787,24 +1907,24 @@
             row.className = 'pr-row-select hover:bg-slate-50 dark:hover:bg-slate-900/50';
             row.id = `pr-row-${pr.id}`;
             row.innerHTML = `
-                <td class="px-1.5 py-1.5">
+                <td class="px-1.5 py-2.5">
                     <div class="flex items-center gap-2 min-w-0">
                         <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(pr.author_login)}" class="h-5 w-5 rounded-full border border-slate-200 dark:border-slate-600 flex-shrink-0" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2220%22%3E%3Crect width=%2220%22 height=%2220%22 fill=%22%23E2E8F0%22/%3E%3C/svg%3E'">
                         <span class="text-xs text-slate-700 dark:text-slate-300 truncate">${escapeHtml(pr.author_login)}</span>
                     </div>
                 </td>
-                <td class="px-1.5 py-1.5">
+                <td class="px-1.5 py-2.5">
                     <div class="flex items-center gap-2 min-w-0">
                         <img src="${escapeHtml(repoOwnerAvatarUrl)}" alt="${escapeHtml(pr.repo_owner)}" class="h-5 w-5 rounded-full border border-slate-200 dark:border-slate-600 flex-shrink-0" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2220%22%3E%3Crect width=%2220%22 height=%2220%22 fill=%22%23E2E8F0%22/%3E%3C/svg%3E'">
                         <a href="${escapeHtml(pr.pr_url)}" target="_blank" rel="noopener noreferrer" class="font-semibold text-slate-900 hover:text-[#BC0000] dark:text-slate-100 dark:hover:text-red-400 truncate text-xs" title="${escapeHtml(pr.title)}">${escapeHtml(truncatedTitle)}</a>
                     </div>
                 </td>
-                <td class="px-1.5 py-1.5 text-slate-600 dark:text-slate-400">
+                <td class="px-1.5 py-2.5 text-slate-600 dark:text-slate-400">
                     <div class="truncate text-xs">${escapeHtml(pr.repo_owner)}/${escapeHtml(pr.repo_name)}</div>
                     <div class="text-[10px] text-slate-500 dark:text-slate-500">#${pr.pr_number}</div>
                 </td>
-                <td class="px-1.5 py-1.5">${reviewBadge}</td>
-                <td class="px-1.5 py-1.5">
+                <td class="px-1.5 py-2.5">${reviewBadge}</td>
+                <td class="px-1.5 py-2.5">
                     <div class="flex flex-wrap gap-1 text-[11px]">
                         <span class="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1 py-0.5 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400">
                             <i class="fas fa-check-circle"></i>${pr.checks_passed}
@@ -1815,14 +1935,14 @@
                         </span>
                     </div>
                 </td>
-                <td class="px-1.5 py-1.5 text-center" id="readiness-status-${pr.id}">
+                <td class="px-1.5 py-2.5 text-center" id="readiness-status-${pr.id}">
                     <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
                 </td>
-                <td class="px-1.5 py-1.5 text-center" id="readiness-score-${pr.id}">
+                <td class="px-1.5 py-2.5 text-center" id="readiness-score-${pr.id}">
                     <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
                 </td>
-                <td class="px-1.5 py-1.5 text-xs text-slate-600 dark:text-slate-400 truncate">${escapeHtml(timeAgo(pr.last_updated_at))}</td>
-                <td class="px-1.5 py-1.5 text-center">
+                <td class="px-1.5 py-2.5 text-xs text-slate-600 dark:text-slate-400 truncate">${escapeHtml(timeAgo(pr.last_updated_at))}</td>
+                <td class="px-1.5 py-2.5 text-center">
                     <div class="flex items-center justify-center gap-1">
                         <button class="update-btn rounded border border-[#E10000] bg-white px-1.5 py-1 text-xs font-semibold text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30" data-pr-id="${pr.id}" title="Update PR data and analyze readiness">
                             <i class="fas fa-sync mr-1"></i>Update
@@ -2483,6 +2603,7 @@
             document.querySelectorAll('.repo-item').forEach(item => {
                 setRepoItemActiveState(item, item.dataset.repo === currentRepo);
             });
+            if (isMobileSidebarViewport()) closeSidebar();
             loadPrs();
         });
 
@@ -2527,6 +2648,19 @@
 
         document.getElementById('themeToggle').addEventListener('click', toggleTheme);
         document.getElementById('autoRefreshToggle').addEventListener('click', toggleAutoRefresh);
+        document.getElementById('sidebarToggleBtn')?.addEventListener('click', toggleSidebar);
+        document.getElementById('sidebarBackdrop')?.addEventListener('click', () => closeSidebar(true));
+        document.getElementById('mainColumn')?.addEventListener('click', () => {
+            if (isMobileSidebarViewport() && document.body.classList.contains('sidebar-open')) {
+                closeSidebar(false);
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.body.classList.contains('sidebar-open')) {
+                closeSidebar(true);
+            }
+        });
 
         // Make sortPrs globally accessible for onclick handlers
         window.sortPrs = sortPrs;
@@ -2666,14 +2800,18 @@
         
         window.addEventListener('resize', () => {
             updatePanelTopOffset();
+            updateSidebarTopOffset();
             updateMainContentHeight();
             adjustPrTableHeight();
+            syncSidebarWithViewport();
         });
 
         initTheme();
         updatePanelTopOffset();
+        updateSidebarTopOffset();
         updateMainContentHeight();
         adjustPrTableHeight();
+        syncSidebarWithViewport();
         loadRateLimit();
         loadLatestRelease();
         loadRepos();
