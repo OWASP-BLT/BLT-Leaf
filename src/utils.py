@@ -59,6 +59,18 @@ def parse_repo_url(url):
     return None
 
 
+def parse_org_url(url):
+    """Parse GitHub organization/user URL to extract the owner name"""
+    if not url:
+        return None
+    url = url.strip().rstrip('/')
+    pattern = r'^https?://github\.com/([^/]+)$'
+    match = re.match(pattern, url)
+    if match:
+        return {'owner': match.group(1)}
+    return None
+
+
 def calculate_review_status(reviews_data):
     """
     Calculate overall review status from reviews data.

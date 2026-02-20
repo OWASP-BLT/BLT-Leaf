@@ -8,7 +8,7 @@ from pyodide.ffi import to_js
 
 # Import from our modules
 from utils import (
-    parse_pr_url, parse_repo_url, calculate_review_status,
+    parse_pr_url, parse_repo_url, parse_org_url, calculate_review_status,
     build_pr_timeline, analyze_review_progress, classify_review_health,
     calculate_pr_readiness
 )
@@ -66,8 +66,102 @@ async def handle_add_pr(request, env):
             # Add all prs (in bulk)
             parsed = parse_repo_url(pr_url)
             if not parsed:
-                return Response.new(json.dumps({'error': 'Invalid GitHub Repository URL'}), 
-                                  {'status': 400, 'headers': {'Content-Type': 'application/json'}})
+                # Check if it's a GitHub organization/user URL
+                org_parsed = parse_org_url(pr_url)
+                if not org_parsed:
+                    return Response.new(json.dumps({'error': 'Invalid GitHub Repository URL'}), 
+                                      {'status': 400, 'headers': {'Content-Type': 'application/json'}})
+                
+                # Import all open PRs from every repository in the org/user account
+                owner = org_parsed['owner']
+                
+                # Prepare headers for paginated fetching
+                headers_dict = {
+                    'User-Agent': 'PR-Tracker/1.0',
+                    'Accept': 'application/vnd.github+json',
+                    'X-GitHub-Api-Version': '2022-11-28'
+                }
+                if user_token:
+                    headers_dict['Authorization'] = f'Bearer {user_token}'
+                headers = Headers.new(to_js(headers_dict, dict_converter=Object.fromEntries))
+                
+                MAX_PRS_PER_IMPORT = 1000
+                added_count = 0
+                truncated = False
+                ts = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+                
+                # Fetch all repositories - try org endpoint first, fall back to user endpoint
+                repos_list = []
+                fetch_error = None
+                for repos_endpoint in [
+                    f"https://api.github.com/orgs/{owner}/repos?type=public&per_page=100",
+                    f"https://api.github.com/users/{owner}/repos?per_page=100"
+                ]:
+                    try:
+                        repos_list = await fetch_paginated_data(repos_endpoint, headers)
+                        break
+                    except Exception as e:
+                        fetch_error = str(e)
+                        continue
+                
+                if not repos_list:
+                    if fetch_error and 'status=403' in fetch_error:
+                        return Response.new(json.dumps({'error': 'Rate Limit Exceeded'}),
+                                          {'status': 403, 'headers': {'Content-Type': 'application/json'}})
+                    return Response.new(json.dumps({'error': f'Could not find public repositories for {owner}'}),
+                                      {'status': 404, 'headers': {'Content-Type': 'application/json'}})
+                
+                for repo_item in repos_list:
+                    repo_name = repo_item.get('name', '')
+                    if not repo_name:
+                        continue
+                    remaining = MAX_PRS_PER_IMPORT - added_count
+                    if remaining <= 0:
+                        truncated = True
+                        break
+                    list_url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls?state=open&sort=created&direction=desc&per_page=100"
+                    try:
+                        result = await fetch_paginated_data(list_url, headers, max_items=remaining, return_metadata=True)
+                        prs_list = result['items']
+                        if result['truncated']:
+                            truncated = True
+                    except Exception:
+                        continue
+                    for item in prs_list:
+                        # Safely access user fields - user can be null for deleted accounts
+                        user = item.get('user') or {}
+                        pr_data = {
+                            'title': item.get('title', ''),
+                            'state': 'open',
+                            'is_merged': 0,
+                            'mergeable_state': 'unknown',
+                            'files_changed': 0,
+                            'author_login': user.get('login', 'ghost'),
+                            'author_avatar': user.get('avatar_url', ''),
+                            'repo_owner_avatar': item.get('base', {}).get('repo', {}).get('owner', {}).get('avatar_url', ''),
+                            'checks_passed': 0,
+                            'checks_failed': 0,
+                            'checks_skipped': 0,
+                            'review_status': 'pending',
+                            'last_updated_at': item.get('updated_at', ts),
+                            'commits_count': 0,
+                            'behind_by': 0,
+                            'is_draft': 1 if item.get('draft') else 0,
+                            'reviewers_json': '[]'
+                        }
+                        await upsert_pr(db, item['html_url'], owner, repo_name, item['number'], pr_data)
+                        added_count += 1
+                
+                message = f'Successfully imported {added_count} PR{"s" if added_count != 1 else ""} from {owner}'
+                if truncated:
+                    message += f' (limited to {MAX_PRS_PER_IMPORT} most recent open PRs)'
+                
+                return Response.new(json.dumps({
+                    'success': True,
+                    'message': message,
+                    'imported_count': added_count,
+                    'truncated': truncated
+                }), {'headers': {'Content-Type': 'application/json'}})
             
             owner, repo = parsed['owner'], parsed['repo']
             
