@@ -468,7 +468,7 @@
                 <div class="flex w-full max-w-4xl flex-col gap-2 sm:flex-row">
                     <input type="text" id="prUrlInput"
                         class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-2 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-red-900/50"
-                        placeholder="Enter GitHub PR URL or Repository URL" autocomplete="off" />
+                        placeholder="Enter GitHub PR URL, Repository URL, or Org URL" autocomplete="off" />
                     <button id="addPrBtn"
                         class="btn-fallback w-[6rem] rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-[#BC0000] disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-200 disabled:text-red-700 dark:disabled:border-red-800 dark:disabled:bg-red-950 dark:disabled:text-red-400">
                         Add PR
@@ -480,7 +480,7 @@
                         class="h-4 w-4 rounded border-slate-300 text-[#E10000] focus:ring-[#E10000] dark:border-slate-600 dark:bg-slate-700">
                     <label for="addAllPrsCheckbox"
                         class="text-sm text-slate-600 dark:text-slate-400 cursor-pointer select-none">
-                        Add all active PRs from this repo
+                        Add all active PRs from this repo or org
                     </label>
                 </div>
             </section>
@@ -2266,6 +2266,14 @@
                     showInputError('prUrlInput', data.error);
                 } else {
                     input.value = '';
+                    // Show a summary message for bulk imports (repo or org)
+                    if (addAll && data.message) {
+                        if (data.truncated) {
+                            alert(`⚠️ Import Completed with Limit\n\n${data.message}\n\nNote: Some repositories or PRs may have been omitted. You can manually add additional PRs using the form.`);
+                        } else {
+                            alert(`✅ ${data.message}`);
+                        }
+                    }
                     invalidateApiCache();
                     await loadRepos();
                     await loadPrs();

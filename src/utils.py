@@ -59,6 +59,22 @@ def parse_repo_url(url):
     return None
 
 
+def parse_org_url(url):
+    """Parse GitHub Org URL to extract org name.
+    
+    Matches URLs of the form https://github.com/ORG (no repo component).
+    Returns None for repo or PR URLs.
+    """
+    if not url:
+        return None
+    url = url.strip().rstrip('/')
+    pattern = r'^https?://github\.com/([^/]+)$'
+    match = re.match(pattern, url)
+    if match:
+        return {'org': match.group(1)}
+    return None
+
+
 def calculate_review_status(reviews_data):
     """
     Calculate overall review status from reviews data.

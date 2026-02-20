@@ -764,3 +764,18 @@ async def verify_github_signature(request, payload_body, secret):
     except Exception as e:
         print(f"Error verifying webhook signature: {e}")
         return False
+
+
+async def fetch_org_repos(org, headers, max_repos=100):
+    """Fetch repositories for a GitHub organization.
+    
+    Args:
+        org: GitHub organization name
+        headers: Headers object to use for requests
+        max_repos: Maximum number of repos to return (default: 100)
+        
+    Returns:
+        dict with 'items' (list of repo objects), 'truncated' bool, 'total_fetched' int
+    """
+    url = f"https://api.github.com/orgs/{org}/repos?type=public&sort=updated&direction=desc&per_page=100"
+    return await fetch_paginated_data(url, headers, max_items=max_repos, return_metadata=True)

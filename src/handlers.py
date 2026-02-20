@@ -8,7 +8,7 @@ from pyodide.ffi import to_js
 
 # Import from our modules
 from utils import (
-    parse_pr_url, parse_repo_url, calculate_review_status,
+    parse_pr_url, parse_repo_url, parse_org_url, calculate_review_status,
     build_pr_timeline, analyze_review_progress, classify_review_health,
     calculate_pr_readiness
 )
@@ -20,13 +20,137 @@ from cache import (
 from database import get_db, upsert_pr
 from github_api import (
     fetch_pr_data, fetch_pr_timeline_data, fetch_paginated_data,
-    verify_github_signature, fetch_multiple_prs_batch
+    verify_github_signature, fetch_multiple_prs_batch, fetch_org_repos
 )
 
 # SQL expression for computed field: issues_count
 # Calculates total issues as sum of blockers and warnings from JSON columns
 # Uses COALESCE to handle NULL values (returns 0 if column is NULL or invalid JSON)
 ISSUES_COUNT_SQL_EXPR = '(COALESCE(json_array_length(blockers), 0) + COALESCE(json_array_length(warnings), 0))'
+
+# Maximum repos to scan when importing an entire org.
+# Chosen to stay within Cloudflare Workers CPU time limits while covering most orgs.
+MAX_REPOS_PER_ORG_IMPORT = 100
+# Maximum PRs imported per repo during org-level import.
+# Matches GitHub's single-page API limit to minimise requests per repo.
+MAX_PRS_PER_REPO_ORG_IMPORT = 100
+
+
+async def handle_add_org(org, user_token, db):
+    """Import all open PRs from all public repos in a GitHub org.
+    
+    Args:
+        org: GitHub org/user login name
+        user_token: Optional GitHub token for authentication
+        db: Database binding
+        
+    Returns:
+        Response with import summary
+    """
+    headers_dict = {
+        'User-Agent': 'PR-Tracker/1.0',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+    }
+    if user_token:
+        headers_dict['Authorization'] = f'Bearer {user_token}'
+
+    headers = Headers.new(to_js(headers_dict, dict_converter=Object.fromEntries))
+
+    # Fetch all public repos for the org
+    try:
+        repos_result = await fetch_org_repos(org, headers, max_repos=MAX_REPOS_PER_ORG_IMPORT)
+    except Exception as e:
+        error_msg = str(e)
+        if 'status=403' in error_msg:
+            return Response.new(json.dumps({'error': 'Rate Limit Exceeded'}),
+                              {'status': 403, 'headers': {'Content-Type': 'application/json'}})
+        if 'status=404' in error_msg:
+            return Response.new(json.dumps({'error': f'Organization or user "{org}" not found'}),
+                              {'status': 404, 'headers': {'Content-Type': 'application/json'}})
+        return Response.new(json.dumps({'error': f'Failed to fetch org repos: {error_msg}'}),
+                          {'status': 400, 'headers': {'Content-Type': 'application/json'}})
+
+    repos_list = repos_result['items']
+    repos_truncated = repos_result['truncated']
+
+    if not repos_list:
+        return Response.new(
+            json.dumps({'success': True, 'message': f'No public repositories found for "{org}"',
+                        'imported_count': 0, 'repos_count': 0, 'truncated': False}),
+            {'headers': {'Content-Type': 'application/json'}}
+        )
+
+    ts = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    total_added = 0
+    repos_with_prs = 0
+
+    for repo_info in repos_list:
+        owner = repo_info.get('owner', {}).get('login', org)
+        repo_name = repo_info.get('name', '')
+        if not repo_name:
+            continue
+
+        list_url = (
+            f"https://api.github.com/repos/{owner}/{repo_name}/pulls"
+            f"?state=open&sort=created&direction=desc&per_page=100"
+        )
+        try:
+            prs_result = await fetch_paginated_data(
+                list_url, headers, max_items=MAX_PRS_PER_REPO_ORG_IMPORT, return_metadata=True
+            )
+            prs_list = prs_result['items']
+        except Exception as repo_err:
+            # Skip repos that fail (private, rate-limited, etc.) but log for visibility
+            print(f"Skipping {owner}/{repo_name} during org import: {repo_err}")
+            continue
+
+        if not prs_list:
+            continue
+
+        repos_with_prs += 1
+        for item in prs_list:
+            user = item.get('user') or {}
+            pr_data = {
+                'title': item.get('title', ''),
+                'state': 'open',
+                'is_merged': 0,
+                'mergeable_state': 'unknown',
+                'files_changed': 0,
+                'author_login': user.get('login', 'ghost'),
+                'author_avatar': user.get('avatar_url', ''),
+                'repo_owner_avatar': item.get('base', {}).get('repo', {}).get('owner', {}).get('avatar_url', ''),
+                'checks_passed': 0,
+                'checks_failed': 0,
+                'checks_skipped': 0,
+                'review_status': 'pending',
+                'last_updated_at': item.get('updated_at', ts),
+                'commits_count': 0,
+                'behind_by': 0,
+                'is_draft': 1 if item.get('draft') else 0,
+                'reviewers_json': '[]'
+            }
+            await upsert_pr(db, item['html_url'], owner, repo_name, item['number'], pr_data)
+            total_added += 1
+
+    message = (
+        f'Successfully imported {total_added} PR{"s" if total_added != 1 else ""} '
+        f'from {repos_with_prs} repo{"s" if repos_with_prs != 1 else ""} '
+        f'in {org}'
+    )
+    if repos_truncated:
+        message += f' (scanned first {MAX_REPOS_PER_ORG_IMPORT} repos)'
+
+    return Response.new(
+        json.dumps({
+            'success': True,
+            'message': message,
+            'imported_count': total_added,
+            'repos_count': repos_with_prs,
+            'truncated': repos_truncated
+        }),
+        {'headers': {'Content-Type': 'application/json'}}
+    )
 
 
 async def handle_add_pr(request, env):
@@ -63,7 +187,12 @@ async def handle_add_pr(request, env):
         db = get_db(env)
         
         if add_all:
-            # Add all prs (in bulk)
+            # Check if the URL is an org URL (github.com/ORG) - handle org-level import
+            org_parsed = parse_org_url(pr_url)
+            if org_parsed:
+                return await handle_add_org(org_parsed['org'], user_token, db)
+
+            # Add all prs (in bulk) from a single repo
             parsed = parse_repo_url(pr_url)
             if not parsed:
                 return Response.new(json.dumps({'error': 'Invalid GitHub Repository URL'}), 
