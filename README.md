@@ -471,6 +471,20 @@ The application uses the GitHub REST API to fetch PR information. No authenticat
 
 For private repositories or higher rate limits, you can add a GitHub token to the worker environment variables.
 
+### GitHub OAuth Login
+
+BLT-Leaf supports GitHub OAuth login so that API requests use the logged-in user's rate limit (5,000 requests/hour) instead of the server's shared unauthenticated limit.
+
+**Setup:**
+1. Create a GitHub OAuth App at <https://github.com/settings/developers>
+2. Set the **Authorization callback URL** to `https://<your-worker-domain>/api/auth/callback`
+3. Add the credentials as Cloudflare Worker secrets:
+   ```bash
+   wrangler secret put GITHUB_CLIENT_ID
+   wrangler secret put GITHUB_CLIENT_SECRET
+   ```
+4. Users can then click the **Login** button in the header to authenticate with GitHub.
+
 ## Webhook Integration
 
 BLT-Leaf supports GitHub webhooks for automatic PR updates, eliminating the need for manual refreshes.
