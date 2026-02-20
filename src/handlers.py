@@ -279,6 +279,17 @@ async def handle_add_pr(request, env):
             try:
                 parsed = parse_pr_url(pr_url)
             except ValueError as e:
+                # Give a more helpful error if the URL looks like an org or repo URL
+                if parse_org_url(pr_url):
+                    return Response.new(
+                        json.dumps({'error': 'This looks like an org URL. Check "Add all active PRs from this repo or org" to import all open PRs across the org.'}),
+                        {'status': 400, 'headers': {'Content-Type': 'application/json'}}
+                    )
+                if parse_repo_url(pr_url):
+                    return Response.new(
+                        json.dumps({'error': 'This looks like a repository URL. Check "Add all active PRs from this repo or org" to import all open PRs from this repo.'}),
+                        {'status': 400, 'headers': {'Content-Type': 'application/json'}}
+                    )
                 return Response.new(
                     json.dumps({'error': str(e)}),
                     {'status': 400, 'headers': {'Content-Type': 'application/json'}}
