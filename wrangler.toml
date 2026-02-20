@@ -11,6 +11,10 @@ database_id = "014201e7-6c0e-4b6a-8c0e-c53d18305dca"
 [vars]
 ENVIRONMENT = "production"
 
+# GitHub OAuth secrets (set via: wrangler secret put GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET)
+# Create an OAuth App at https://github.com/settings/developers
+# Set Authorization callback URL to: https://<your-worker-domain>/api/auth/callback
+
 # Configure assets (static files)
 [assets]
 directory = "./public"

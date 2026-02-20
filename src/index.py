@@ -18,7 +18,9 @@ from handlers import (
     handle_github_webhook,
     handle_pr_timeline,
     handle_pr_review_analysis,
-    handle_pr_readiness
+    handle_pr_readiness,
+    handle_github_oauth_login,
+    handle_github_oauth_callback
 )
 
 
@@ -107,6 +109,14 @@ async def on_fetch(request, env):
         return response 
     elif path == '/api/status' and request.method == 'GET':
         response = await handle_status(env)
+    elif path == '/api/auth/login' and request.method == 'GET':
+        response = await handle_github_oauth_login(env)
+        for key, value in cors_headers.items():
+            response.headers.set(key, value)
+        return response
+    elif path == '/api/auth/callback' and request.method == 'GET':
+        response = await handle_github_oauth_callback(request, env)
+        return response
     elif path == '/api/github/webhook' and request.method == 'POST':
         response = await handle_github_webhook(request, env)
         for key, value in cors_headers.items():

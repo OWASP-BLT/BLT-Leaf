@@ -3,7 +3,7 @@
 import json
 import re
 from datetime import datetime, timezone
-from js import Response, Headers, Object
+from js import Response, Headers, Object, fetch as js_fetch
 from pyodide.ffi import to_js
 
 # Import from our modules
@@ -614,6 +614,73 @@ async def handle_status(env):
             'error': str(e),
             'environment': getattr(env, 'ENVIRONMENT', 'unknown')
         }), {'headers': {'Content-Type': 'application/json'}})
+
+async def handle_github_oauth_login(env):
+    """
+    GET /api/auth/login
+    Redirect the user to GitHub OAuth authorization page.
+    Requires GITHUB_CLIENT_ID secret to be configured.
+    """
+    client_id = getattr(env, 'GITHUB_CLIENT_ID', None)
+    if not client_id:
+        return Response.new(
+            json.dumps({'error': 'GitHub OAuth not configured. Set GITHUB_CLIENT_ID secret.'}),
+            {'status': 501, 'headers': {'Content-Type': 'application/json'}}
+        )
+    from urllib.parse import quote
+    auth_url = f'https://github.com/login/oauth/authorize?client_id={quote(client_id, safe="")}&scope=read%3Auser'
+    return Response.new('', {'status': 302, 'headers': {'Location': auth_url}})
+
+
+async def handle_github_oauth_callback(request, env):
+    """
+    GET /api/auth/callback
+    Exchange the GitHub OAuth authorization code for an access token,
+    then redirect the user back to the frontend with the token in the URL fragment.
+    Requires GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET secrets to be configured.
+    """
+    from js import URL as js_URL
+    url = js_URL.new(request.url)
+    code = url.searchParams.get('code')
+
+    if not code:
+        error = url.searchParams.get('error', 'unknown')
+        return Response.new('', {'status': 302, 'headers': {'Location': f'/?auth_error={error}'}})
+
+    client_id = getattr(env, 'GITHUB_CLIENT_ID', None)
+    client_secret = getattr(env, 'GITHUB_CLIENT_SECRET', None)
+    if not client_id or not client_secret:
+        return Response.new('', {'status': 302, 'headers': {'Location': '/?auth_error=config'}})
+
+    try:
+        token_response = await js_fetch(
+            'https://github.com/login/oauth/access_token',
+            to_js({
+                'method': 'POST',
+                'headers': {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'PR-Tracker/1.0'
+                },
+                'body': json.dumps({
+                    'client_id': client_id,
+                    'client_secret': client_secret,
+                    'code': code
+                })
+            }, dict_converter=Object.fromEntries)
+        )
+        token_data = (await token_response.json()).to_py()
+    except Exception as e:
+        print(f"OAuth token exchange error: {str(e)}")
+        return Response.new('', {'status': 302, 'headers': {'Location': '/?auth_error=exchange'}})
+
+    access_token = token_data.get('access_token')
+    if not access_token:
+        return Response.new('', {'status': 302, 'headers': {'Location': '/?auth_error=token'}})
+
+    # Redirect to frontend with token in URL fragment (not logged by servers)
+    return Response.new('', {'status': 302, 'headers': {'Location': f'/#github_token={access_token}'}})
+
 
 async def handle_pr_updates_check(env):
     """

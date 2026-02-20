@@ -326,6 +326,10 @@
                             title="Contribute">
                             <i class="fab fa-github text-xs"></i>
                         </a>
+                        <button class="github-login-btn rounded-lg bg-slate-700 p-1.5 text-white hover:bg-slate-600"
+                            title="Login with GitHub to use your API rate limit">
+                            <i class="fab fa-github text-xs"></i>
+                        </button>
                     </div>
                 </div>
                 
@@ -415,6 +419,10 @@
                         title="Contribute">
                         <i class="fab fa-github"></i> <span class="hidden sm:inline">Contribute</span>
                     </a>
+                    <button class="github-login-btn rounded-lg bg-slate-700 px-2 sm:px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600 inline-flex items-center gap-2 transition-colors shadow-sm"
+                        title="Login with GitHub to use your API rate limit">
+                        <i class="fab fa-github"></i> <span class="hidden sm:inline">Login</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -570,7 +578,59 @@
         let prUpdateTimestamps = {}; // Track PR update timestamps for change detection
         const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 
-        // Helper functions for readiness data persistence
+        // GitHub OAuth token management
+        // On page load, check if a token was just returned in the URL fragment
+        // or if an auth error was returned as a query parameter
+        (function handleOAuthCallback() {
+            const hash = window.location.hash;
+            if (hash.startsWith('#github_token=')) {
+                const token = hash.slice('#github_token='.length);
+                if (token) {
+                    localStorage.setItem('github_token', token);
+                }
+                // Clean the token from the URL immediately
+                history.replaceState(null, '', window.location.pathname + window.location.search);
+            }
+            const params = new URLSearchParams(window.location.search);
+            if (params.has('auth_error')) {
+                console.warn('GitHub OAuth error:', params.get('auth_error'));
+                const cleanUrl = window.location.pathname;
+                history.replaceState(null, '', cleanUrl);
+            }
+        })();
+
+        function getGithubToken() {
+            return localStorage.getItem('github_token') || null;
+        }
+
+        function getAuthHeaders() {
+            const token = getGithubToken();
+            return token ? { 'x-github-token': token } : {};
+        }
+
+        function githubLogout() {
+            localStorage.removeItem('github_token');
+            updateLoginButton();
+        }
+
+        function updateLoginButton() {
+            const token = getGithubToken();
+            document.querySelectorAll('.github-login-btn').forEach(btn => {
+                if (token) {
+                    btn.setAttribute('aria-label', 'Logged in with GitHub – click to logout');
+                    btn.title = 'Logged in with GitHub – click to logout';
+                    btn.innerHTML = '<i class="fab fa-github" aria-hidden="true"></i> <span class="hidden sm:inline">Logout</span>';
+                    btn.onclick = (e) => { e.preventDefault(); githubLogout(); };
+                } else {
+                    btn.setAttribute('aria-label', 'Login with GitHub to use your API rate limit');
+                    btn.title = 'Login with GitHub to use your API rate limit';
+                    btn.innerHTML = '<i class="fab fa-github" aria-hidden="true"></i> <span class="hidden sm:inline">Login</span>';
+                    btn.onclick = (e) => { e.preventDefault(); window.location.href = '/api/auth/login'; };
+                }
+            });
+        }
+
+
         function saveReadinessData(prId, readiness, reviewHealth) {
             try {
                 const data = JSON.parse(localStorage.getItem('prReadinessData') || '{}');
@@ -682,7 +742,7 @@
                 const MS_PER_MINUTE = 60000;
                 const MINUTES_PER_HOUR = 60;
 
-                const response = await fetch('/api/rate-limit');
+                const response = await fetch('/api/rate-limit', { headers: getAuthHeaders() });
                 const textEl = document.getElementById('rateLimitText');
                 const fillEl = document.getElementById('rateLimitFill');
                 const usedEl = document.getElementById('rateLimitUsed');
@@ -918,7 +978,7 @@
 
         async function loadRepos() {
             try {
-                const response = await fetch('/api/repos');
+                const response = await fetch('/api/repos', { headers: getAuthHeaders() });
                 const data = await response.json();
 
                 if (data.error) {
@@ -1134,7 +1194,7 @@
                     url = `/api/prs?repo=${encodeURIComponent(currentRepo)}&page=${currentPage}&per_page=${perPage}&sort_by=${sortByParam}&sort_dir=${sortDirParam}`;
                 }
 
-                const response = await fetch(url);
+                const response = await fetch(url, { headers: getAuthHeaders() });
                 
                 // Check if the HTTP request was successful
                 if (!response.ok) {
@@ -1251,7 +1311,7 @@
             if (!autoRefreshEnabled) return;
 
             try {
-                const response = await fetch('/api/prs/updates');
+                const response = await fetch('/api/prs/updates', { headers: getAuthHeaders() });
                 const data = await response.json();
 
                 if (data.error) {
@@ -2033,7 +2093,8 @@
                 const refreshResponse = await fetch('/api/refresh', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ pr_id: prId })
                 });
@@ -2100,7 +2161,7 @@
                 }
 
                 // Step 2: Analyze readiness
-                const readinessResponse = await fetch(`/api/prs/${prId}/readiness`);
+                const readinessResponse = await fetch(`/api/prs/${prId}/readiness`, { headers: getAuthHeaders() });
                 const readinessData = await readinessResponse.json();
 
                 if (readinessData.error) {
@@ -2261,7 +2322,8 @@
                 const response = await fetch('/api/prs', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({
                         pr_url: prUrl,
@@ -2299,7 +2361,8 @@
                 const response = await fetch('/api/prs', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ 
                         pr_url: repoUrl,
@@ -2530,6 +2593,7 @@
         });
 
         initTheme();
+        updateLoginButton();
         loadRateLimit();
         loadLatestRelease();
         loadRepos();
