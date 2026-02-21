@@ -28,7 +28,7 @@ const CACHEABLE_API_PATHS = [
     '/api/status'
 ];
 
-// Max age for API cache entries  - 5 minutes
+// Max age for API cache entries - 5 minutes
 const API_CACHE_MAX_AGE = 5 * 60 * 1000;
 
 // Install
@@ -169,12 +169,44 @@ async function staleWhileRevalidate(request, cacheName, maxAge) {
     return fetchAndCache;
 }
 
+// Helper function to verify trusted sources
+function isTrustedSource(source) {
+    // Customize this logic based on your application's requirements
+    // Example: Check if the source is a known, trusted window or client
+    return true; // Replace with actual logic
+}
+
+// Helper function to validate paths
+function isValidPath(path) {
+    // Customize this logic based on your application's requirements
+    // Example: Ensure the path is a string and matches expected patterns
+    return typeof path === 'string' && /^[a-zA-Z0-9\/\-_]+$/.test(path);
+}
+
 // Message handler for cache invalidation
 self.addEventListener('message', (event) => {
-    if (event.data?.type === 'INVALIDATE_API_CACHE') {
+    // Verify message origin
+    if (!event.source || !isTrustedSource(event.source)) {
+        console.warn('Message from untrusted source ignored.');
+        return;
+    }
+
+    // Validate the message data structure
+    if (!event.data || typeof event.data !== 'object' || !event.data.type) {
+        console.warn('Invalid message data structure.');
+        return;
+    }
+
+    // Handle cache invalidation
+    if (event.data.type === 'INVALIDATE_API_CACHE') {
+        const path = event.data.path;
+        if (typeof path !== 'string' || !isValidPath(path)) {
+            console.warn('Invalid or malicious path ignored.');
+            return;
+        }
+
         caches.open(API_CACHE).then((cache) => {
             cache.keys().then((keys) => {
-                const path = event.data.path;
                 keys.forEach((key) => {
                     const keyUrl = new URL(key.url);
                     if (!path || keyUrl.pathname.startsWith(path)) {
@@ -185,7 +217,8 @@ self.addEventListener('message', (event) => {
         });
     }
 
-    if (event.data?.type === 'CLEAR_ALL_CACHES') {
+    // Handle clearing all caches
+    if (event.data.type === 'CLEAR_ALL_CACHES') {
         caches.keys().then((keys) =>
             Promise.all(keys.map((key) => caches.delete(key)))
         );
