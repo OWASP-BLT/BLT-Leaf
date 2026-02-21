@@ -1076,18 +1076,22 @@
     </main>
 
     <!-- Footer -->
-    <footer class="border-t border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div class="mx-auto max-w-7xl px-4 py-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2">
-            <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                <i class="fas fa-shield-halved text-emerald-600 dark:text-emerald-400"></i>
-                <span>OWASP BLT-Leaf — PR Readiness Checker</span>
+    <footer class="border-t border-slate-800 bg-slate-900 text-slate-100">
+        <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+            <p class="text-sm leading-relaxed sm:text-base text-slate-200">
+                Leaf is a Readiness and Security PR checker. It reviews pull requests for operational readiness,
+                security risks, and production-impacting changes before they ship. Inspired by the surge of AI-generated
+                PRs, Leaf helps teams maintain high standards by adding an automated layer of critical thinking and risk
+                detection to every change.
+            </p>
+            <div class="mt-4 flex items-center gap-2 text-sm font-semibold text-slate-100">
+                <i class="fas fa-lock text-yellow-400"></i>
+                <span>Security features are coming soon!</span>
             </div>
-            <div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
-                <a href="https://owasp.org/www-project-bug-logging-tool/" target="_blank" rel="noopener noreferrer"
-                    class="hover:text-slate-600 dark:hover:text-slate-300 transition-colors">OWASP BLT</a>
-                <a href="https://github.com/OWASP-BLT/BLT-Leaf" target="_blank" rel="noopener noreferrer"
-                    class="hover:text-slate-600 dark:hover:text-slate-300 transition-colors">GitHub</a>
-                <span>AGPL-3.0</span>
+            <div class="mt-4 text-xs text-slate-400">
+                Part of the <a href="https://owasp.org/www-project-bug-logging-tool/" target="_blank"
+                    rel="noopener noreferrer" class="text-red-400 hover:text-red-300 transition-colors">OWASP Bug Logging Tool
+                    (BLT)</a> project
             </div>
         </div>
     </footer>
