@@ -9,6 +9,7 @@ from handlers import (
     handle_list_repos,
     handle_refresh_pr,
     handle_batch_refresh_prs,
+    handle_refresh_repo,
     handle_rate_limit,
     handle_status,
     handle_pr_updates_check,
@@ -101,6 +102,8 @@ async def on_fetch(request, env):
         response = await handle_refresh_pr(request, env)
     elif path == '/api/refresh-batch' and request.method == 'POST':
         response = await handle_batch_refresh_prs(request, env)
+    elif path == '/api/refresh-repo' and request.method == 'POST':
+        response = await handle_refresh_repo(request, env)
     elif path == '/api/rate-limit' and request.method == 'GET':
         response = await handle_rate_limit(env)
         for key, value in cors_headers.items():

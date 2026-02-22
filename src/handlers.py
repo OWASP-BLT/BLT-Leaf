@@ -21,7 +21,8 @@ from cache import (
 from database import get_db, upsert_pr
 from github_api import (
     fetch_pr_data, fetch_pr_timeline_data, fetch_paginated_data,
-    verify_github_signature, fetch_multiple_prs_batch, fetch_org_repos
+    verify_github_signature, fetch_multiple_prs_batch, fetch_org_repos,
+    fetch_repo_open_prs, fetch_repo_comparison_batch
 )
 
 # SQL expression for computed field: issues_count
@@ -633,7 +634,110 @@ async def handle_batch_refresh_prs(request, env):
     except Exception as e:
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
-        
+
+
+async def handle_refresh_repo(request, env):
+    """
+    Refresh repo-level data (behind_by) for all tracked PRs in a specific repository.
+
+    POST /api/refresh-repo
+    Body: { "repo_owner": "OWASP-BLT", "repo_name": "BLT" }
+
+    This endpoint is optimised for the case where the base branch has advanced
+    (e.g. another PR was just merged).  Instead of re-fetching every PR in full,
+    it:
+      1. Loads the tracked PRs for the repo from the DB (no GitHub API call).
+      2. Issues a single GraphQL batch call to fetch comparison data (behind_by)
+         for all those PRs at once.
+      3. Updates only the `behind_by` column for each PR in the DB.
+
+    This separates the expensive repo-wide refresh from the cheaper per-PR refresh
+    (reviews, check runs, conversations) that the batch endpoint handles.
+    """
+    try:
+        data = (await request.json()).to_py()
+        repo_owner = data.get('repo_owner')
+        repo_name = data.get('repo_name')
+        user_token = request.headers.get('x-github-token') or getattr(env, 'GITHUB_TOKEN', None)
+
+        if not repo_owner or not repo_name:
+            return Response.new(
+                json.dumps({'error': 'repo_owner and repo_name are required'}),
+                {'status': 400, 'headers': {'Content-Type': 'application/json'}}
+            )
+
+        db = get_db(env)
+
+        # Step 1: Fetch all open PRs for this repo from GitHub (head_sha + base_branch per PR).
+        github_prs = await fetch_repo_open_prs(repo_owner, repo_name, user_token)
+
+        # Step 2: Cross-reference GitHub PRs with our DB to get only tracked PRs.
+        github_pr_map = {pr['number']: pr for pr in github_prs}
+
+        db_stmt = db.prepare(
+            'SELECT id, pr_number FROM prs WHERE repo_owner = ? AND repo_name = ? AND state = \'open\' AND is_merged = 0'
+        ).bind(repo_owner, repo_name)
+        db_result = await db_stmt.all()
+
+        if not db_result or not db_result.results:
+            return Response.new(
+                json.dumps({'success': True, 'updated': 0, 'message': 'No tracked open PRs found for this repo'}),
+                {'headers': {'Content-Type': 'application/json'}}
+            )
+
+        prs_info = []
+        pr_id_map = {}  # (owner, repo, pr_number) -> pr_id
+        for row in db_result.results:
+            row_dict = row.to_py()
+            pr_number = row_dict['pr_number']
+            pr_id = row_dict['id']
+            gh_pr = github_pr_map.get(pr_number)
+            if not gh_pr:
+                continue  # PR not found in GitHub open PRs (may have been closed)
+            head_sha = gh_pr.get('head_sha', '')
+            base_branch = gh_pr.get('base_branch', '')
+            if head_sha and base_branch:
+                prs_info.append({
+                    'owner': repo_owner,
+                    'repo': repo_name,
+                    'pr_number': pr_number,
+                    'head_sha': head_sha,
+                    'base_branch': base_branch,
+                })
+                pr_id_map[(repo_owner, repo_name, pr_number)] = pr_id
+
+        if not prs_info:
+            return Response.new(
+                json.dumps({'success': True, 'updated': 0, 'message': 'No PRs with valid ref data to compare'}),
+                {'headers': {'Content-Type': 'application/json'}}
+            )
+
+        # Step 3: Batch-fetch comparison data (behind_by) for all tracked PRs.
+        comparison_results = await fetch_repo_comparison_batch(prs_info, user_token)
+
+        # Step 4: Update behind_by in DB for each PR.
+        updated = 0
+        for key, behind_by in comparison_results.items():
+            pr_id = pr_id_map.get(key)
+            if pr_id is None:
+                continue
+            await db.prepare(
+                'UPDATE prs SET behind_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+            ).bind(behind_by, pr_id).run()
+            updated += 1
+
+        return Response.new(json.dumps({
+            'success': True,
+            'updated': updated,
+            'repo': f'{repo_owner}/{repo_name}',
+            'rate_limit': get_rate_limit_cache()
+        }), {'headers': {'Content-Type': 'application/json'}})
+
+    except Exception as e:
+        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+
+
 async def handle_rate_limit(env):
     """
     GET /api/rate-limit
