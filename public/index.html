@@ -1677,6 +1677,8 @@
             };
 
             const refreshApiCalls = Math.ceil(allPrs.length / 50);
+            const uniqueRepoCount = new Set(allPrs.map(p => p.repo_owner + '/' + p.repo_name)).size;
+            const repoApiCalls = uniqueRepoCount * 2;
             // Each readiness check fetches at least 4 GitHub endpoints in parallel:
             // commits, reviews, review_comments, issue_comments
             // NOTE: This is a lower-bound estimate; pagination can require additional API calls per PR.
@@ -1698,8 +1700,14 @@
                     <button 
                         id="refreshPrsBtn" 
                         class="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600"
-                        title="Refresh essential PR data from GitHub API (uses GraphQL batch: 1 call per 50 PRs)">
-                        <i class="fas fa-sync-alt"></i> Refresh All Essential <span class="font-semibold text-slate-500 dark:text-slate-400">(${refreshApiCalls} API call${refreshApiCalls !== 1 ? 's' : ''})</span>
+                        title="Refresh per-PR data from GitHub API (uses GraphQL batch: 2 calls per 50 PRs). Updates reviews, check runs, conversations, and branch comparison for every tracked PR.">
+                        <i class="fas fa-sync-alt"></i> Refresh All PRs <span class="font-semibold text-slate-500 dark:text-slate-400">(${refreshApiCalls * 2} API call${refreshApiCalls * 2 !== 1 ? 's' : ''})</span>
+                    </button>
+                    <button 
+                        id="refreshRepoBtn" 
+                        class="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600"
+                        title="Refresh repo-level data (behind_by) for all unique repositories. Efficient: 2 GraphQL calls per repo regardless of PR count. Use after a PR is merged to update how far behind other PRs are.">
+                        <i class="fas fa-code-branch"></i> Refresh Repo Data <span class="font-semibold text-slate-500 dark:text-slate-400">(${repoApiCalls} API call${repoApiCalls !== 1 ? 's' : ''})</span>
                     </button>
                     <button 
                         id="analyzeAllBtn" 
@@ -2727,6 +2735,46 @@
                     await loadPrs(true);
                 } catch (err) {
                     showError(`Failed to refresh PRs: ${err.message}`);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('opacity-70', 'cursor-not-allowed');
+                }
+                return;
+            }
+
+            // Handle Refresh Repo Data button (update behind_by for all repos, 2 API calls per repo)
+            if (e.target.closest('#refreshRepoBtn')) {
+                const btn = e.target.closest('#refreshRepoBtn');
+                const originalHtml = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing repos...';
+                btn.classList.add('opacity-70', 'cursor-not-allowed');
+                try {
+                    // Get unique repos from the current PR list
+                    const uniqueRepos = [...new Map(allPrs.map(pr => [
+                        pr.repo_owner + '/' + pr.repo_name,
+                        { repo_owner: pr.repo_owner, repo_name: pr.repo_name }
+                    ])).values()];
+                    let refreshed = 0;
+                    for (const repo of uniqueRepos) {
+                        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Refreshing ${repo.repo_owner}/${repo.repo_name}...`;
+                        const resp = await fetch('/api/refresh-repo', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(repo)
+                        });
+                        if (!resp.ok) {
+                            const errData = await resp.json().catch(() => ({}));
+                            throw new Error(errData.error || `Refresh-repo failed (${resp.status})`);
+                        }
+                        const data = await resp.json();
+                        if (data.error) throw new Error(data.error);
+                        refreshed += data.updated || 0;
+                    }
+                    await loadPrs(true);
+                } catch (err) {
+                    showError(`Failed to refresh repo data: ${err.message}`);
                 } finally {
                     btn.disabled = false;
                     btn.innerHTML = originalHtml;
