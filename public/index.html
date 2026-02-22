@@ -2714,7 +2714,8 @@
                         <span>checking…</span>
                     </span>
                     <span id="dbRowCounts" class="hidden">
-                        &bull; PRs: <span id="dbPrsCount">—</span>
+                        &bull; Open PRs: <span id="dbOpenPrsCount">—</span>
+                        &bull; Total in DB: <span id="dbPrsCount">—</span>
                         &bull; Timeline cache: <span id="dbTimelineCount">—</span>
                     </span>
                 </div>
@@ -2729,14 +2730,16 @@
                 const data = await res.json();
                 const indicator = document.getElementById('dbStatusIndicator');
                 const rowCounts = document.getElementById('dbRowCounts');
-                const prsCount = document.getElementById('dbPrsCount');
-                const timelineCount = document.getElementById('dbTimelineCount');
                 if (data.database_configured) {
                     indicator.innerHTML =
                         '<span class="inline-block h-2 w-2 rounded-full bg-green-500"></span>' +
                         '<span class="text-green-600 dark:text-green-400">Connected</span>';
-                    prsCount.textContent = (data.row_counts && data.row_counts.prs != null) ? data.row_counts.prs : '—';
-                    timelineCount.textContent = (data.row_counts && data.row_counts.timeline_cache != null) ? data.row_counts.timeline_cache : '—';
+                    const openPrsCount = document.getElementById('dbOpenPrsCount');
+                    const prsCount = document.getElementById('dbPrsCount');
+                    const timelineCount = document.getElementById('dbTimelineCount');
+                    if (openPrsCount) openPrsCount.textContent = (data.row_counts && data.row_counts.open_prs != null) ? data.row_counts.open_prs : '—';
+                    if (prsCount) prsCount.textContent = (data.row_counts && data.row_counts.prs != null) ? data.row_counts.prs : '—';
+                    if (timelineCount) timelineCount.textContent = (data.row_counts && data.row_counts.timeline_cache != null) ? data.row_counts.timeline_cache : '—';
                     rowCounts.classList.remove('hidden');
                 } else {
                     indicator.innerHTML =

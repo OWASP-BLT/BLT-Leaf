@@ -382,7 +382,7 @@ async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=No
             }
         }), {'headers': {
             'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=60, stale-while-revalidate=300'
+            'Cache-Control': 'no-store'
         }})
 
     except Exception as e:
@@ -661,12 +661,17 @@ async def handle_status(env):
         db = get_db(env)
         # Query row counts for each table
         prs_result = await db.prepare('SELECT COUNT(*) as count FROM prs').first()
+        open_prs_result = await db.prepare(
+            "SELECT COUNT(*) as count FROM prs "
+            "WHERE is_merged = 0 AND (state = 'open' OR state IS NULL OR state = '')"
+        ).first()
         timeline_result = await db.prepare('SELECT COUNT(*) as count FROM timeline_cache').first()
 
         def _row_to_dict(r):
             return r.to_py() if hasattr(r, 'to_py') else dict(r)
 
         prs_count = _row_to_dict(prs_result).get('count', 0) if prs_result else 0
+        open_prs_count = _row_to_dict(open_prs_result).get('count', 0) if open_prs_result else 0
         timeline_count = _row_to_dict(timeline_result).get('count', 0) if timeline_result else 0
 
         return Response.new(json.dumps({
@@ -674,6 +679,7 @@ async def handle_status(env):
             'environment': getattr(env, 'ENVIRONMENT', 'unknown'),
             'row_counts': {
                 'prs': prs_count,
+                'open_prs': open_prs_count,
                 'timeline_cache': timeline_count
             }
         }), {'headers': {'Content-Type': 'application/json'}})

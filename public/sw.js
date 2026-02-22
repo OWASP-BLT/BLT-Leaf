@@ -1,6 +1,6 @@
 // Service Worker - caches static assets, API responses, and HTML pages for faster loads.
 
-const CACHE_VERSION = 'blt-leaf-v3';
+const CACHE_VERSION = 'blt-leaf-v4';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 const CDN_CACHE = `${CACHE_VERSION}-cdn`;
@@ -79,6 +79,14 @@ self.addEventListener('fetch', (event) => {
 
     // Same origin requests only from here
     if (url.origin !== self.location.origin) return;
+
+    // PR list endpoints must NEVER be cached - always fetch fresh from network.
+    // Caching these caused "No PRs Added Yet" when a stale empty response was served.
+    // This covers both /api/prs (list) and /api/prs/updates (polling endpoint).
+    if (url.pathname.startsWith('/api/prs')) {
+        event.respondWith(fetch(request));
+        return;
+    }
 
     // API endpoints - stale-while-revalidate
     // Skip cache if URL contains cache-busting parameter
