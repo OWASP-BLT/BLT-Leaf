@@ -1238,6 +1238,12 @@
                     }
                 }
 
+                // If initial (non-cache-busted) load returned zero PRs, retry once with
+                // cache-busting to bypass any stale service-worker cached empty response.
+                if (!bypassCache && allPrs.length === 0) {
+                    return loadPrs(true);
+                }
+
                 // Attach readiness data from localStorage to each PR for display and computed columns
                 allPrs.forEach(pr => {
                     // First, try to get readiness data from database (if it exists)

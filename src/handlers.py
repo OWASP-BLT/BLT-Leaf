@@ -258,7 +258,7 @@ async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=No
         offset = (page - 1) * per_page
         base_query = '''
             FROM prs
-            WHERE is_merged = 0 AND state = 'open'
+            WHERE is_merged = 0 AND (state = 'open' OR state IS NULL OR state = '')
         '''
 
         params = []
@@ -399,7 +399,7 @@ async def handle_list_repos(env):
             SELECT DISTINCT repo_owner, repo_name, 
                    COUNT(*) as pr_count
             FROM prs 
-            WHERE is_merged = 0 AND state = 'open'
+            WHERE is_merged = 0 AND (state = 'open' OR state IS NULL OR state = '')
             GROUP BY repo_owner, repo_name
             ORDER BY repo_owner, repo_name
         ''')
@@ -700,8 +700,14 @@ async def handle_pr_updates_check(env):
     try:
         db = get_db(env)
         
-        # Fetch only IDs and timestamps - minimal data transfer
-        stmt = db.prepare('SELECT id, updated_at FROM prs ORDER BY id')
+        # Fetch only IDs and timestamps for open, non-merged PRs - minimal data transfer
+        # Filter matches handle_list_prs so the frontend safety net is accurate:
+        # updates.length > 0 only when there are actually open PRs to display
+        stmt = db.prepare(
+            "SELECT id, updated_at FROM prs "
+            "WHERE is_merged = 0 AND (state = 'open' OR state IS NULL OR state = '') "
+            "ORDER BY id"
+        )
         result = await stmt.all()
         
         if not result or not result.results:

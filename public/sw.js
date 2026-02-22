@@ -1,6 +1,6 @@
 // Service Worker - caches static assets, API responses, and HTML pages for faster loads.
 
-const CACHE_VERSION = 'blt-leaf-v2';
+const CACHE_VERSION = 'blt-leaf-v3';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 const CDN_CACHE = `${CACHE_VERSION}-cdn`;
@@ -21,8 +21,9 @@ const CDN_ORIGINS = [
 ];
 
 // API paths to cache with stale-while-revalidate
+// NOTE: /api/prs is intentionally excluded - PR list is dynamic and must always be fresh
+// to avoid serving stale empty responses when PRs exist in the database.
 const CACHEABLE_API_PATHS = [
-    '/api/prs',
     '/api/repos',
     '/api/rate-limit',
     '/api/status'
