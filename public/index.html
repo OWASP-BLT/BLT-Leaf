@@ -457,13 +457,23 @@
         <aside
             class="w-full border-b border-slate-200 bg-white md:w-72 md:border-b-0 md:border-r dark:border-slate-700 dark:bg-slate-800">
             <div class="p-4">
-                <h2 class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Repositories <span id="repoCountDisplay"></span>
+                <h2 class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400 flex items-center flex-wrap gap-1">
+                    <span>Repositories <span id="repoCountDisplay"></span></span>
                     <button id="repoSortBtn" title="Sort repositories by open PRs" onclick="toggleRepoSort()"
-                        class="ml-1 inline-flex items-center rounded px-1 py-0.5 text-slate-400 hover:text-[#BC0000] dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors align-middle"
+                        class="inline-flex items-center rounded px-1 py-0.5 text-slate-400 hover:text-[#BC0000] dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors align-middle"
                         aria-label="Sort repositories by open PRs">
                         <svg id="repoSortIcon" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
                             <path d="M3 3a1 1 0 0 0 0 2h10a1 1 0 1 0 0-2H3zm2 4a1 1 0 0 0 0 2h6a1 1 0 1 0 0-2H5zm2 4a1 1 0 0 0 0 2h2a1 1 0 1 0 0-2H7z"/>
                         </svg>
+                    </button>
+                    <button id="orgModeBtn" title="Org mode: filter repos to selected org" onclick="toggleOrgMode()"
+                        class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-slate-400 hover:text-[#BC0000] dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors align-middle"
+                        aria-label="Toggle org mode">
+                        <span id="orgModeSwitch" class="relative inline-block h-3 w-5 flex-shrink-0 align-middle">
+                            <span class="block h-3 w-5 rounded-full border border-current transition-colors" id="orgModeTrack"></span>
+                            <span class="absolute top-0.5 left-0.5 h-2 w-2 rounded-full bg-current transition-transform" id="orgModeThumb"></span>
+                        </span>
+                        <span class="text-[10px] leading-none normal-case font-medium tracking-normal" id="orgModeLbl">Org</span>
                     </button>
                 </h2>
                 
@@ -568,6 +578,7 @@
         let allPrs = [];
         let repos = [];
         let repoSortByPrs = localStorage.getItem('repoSortByPrs') !== 'false';
+        let orgMode = localStorage.getItem('orgMode') === 'true';
         // Support unlimited sort columns
         // Each entry in sortColumns array has: {column: 'column_name', direction: 'asc'|'desc'}
         let sortColumns = [];
@@ -1010,6 +1021,19 @@
             renderRepoList();
         }
 
+        function toggleOrgMode() {
+            orgMode = !orgMode;
+            localStorage.setItem('orgMode', orgMode);
+            renderRepoList();
+        }
+
+        function getCurrentOrg() {
+            if (orgMode && currentRepo !== 'all' && currentRepo.includes('/')) {
+                return currentRepo.split('/')[0];
+            }
+            return null;
+        }
+
         function scrollToTop() {
             const mainEl = document.querySelector('main');
             if (mainEl) {
@@ -1044,8 +1068,16 @@
             const totalPrs = repos.reduce((sum, repo) => sum + repo.pr_count, 0);
             allReposCount.textContent = `${totalPrs} PR${totalPrs === 1 ? '' : 's'}`;
 
-            // Update the repository count display
-            const repoCount = repos.length;
+            // Determine current org for org mode filtering
+            const currentOrg = getCurrentOrg();
+
+            // Filter repos by org when org mode is active and a specific repo is selected
+            const orgFilteredRepos = currentOrg
+                ? repos.filter(r => r.repo_owner === currentOrg)
+                : repos;
+
+            // Update the repository count display (show filtered count when org mode is active)
+            const repoCount = orgFilteredRepos.length;
             repoCountDisplay.textContent = repoCount > 0 ? `(${repoCount})` : '';
 
             // Update sort button appearance
@@ -1056,10 +1088,28 @@
                 repoSortBtn.classList.toggle('text-slate-400', !repoSortByPrs);
             }
 
+            // Update org mode button/switch appearance
+            const orgModeBtn = document.getElementById('orgModeBtn');
+            const orgModeTrack = document.getElementById('orgModeTrack');
+            const orgModeThumb = document.getElementById('orgModeThumb');
+            if (orgModeBtn) {
+                orgModeBtn.classList.toggle('text-[#BC0000]', orgMode);
+                orgModeBtn.classList.toggle('dark:text-red-400', orgMode);
+                orgModeBtn.classList.toggle('text-slate-400', !orgMode);
+            }
+            if (orgModeTrack) {
+                orgModeTrack.classList.toggle('bg-[#BC0000]', orgMode);
+                orgModeTrack.classList.toggle('dark:bg-red-600', orgMode);
+            }
+            if (orgModeThumb) {
+                orgModeThumb.style.transform = orgMode ? 'translateX(8px)' : '';
+                orgModeThumb.classList.toggle('bg-white', orgMode);
+            }
+
             // Sort repos by pr_count descending when enabled
             const displayRepos = repoSortByPrs
-                ? [...repos].sort((a, b) => b.pr_count - a.pr_count)
-                : repos;
+                ? [...orgFilteredRepos].sort((a, b) => b.pr_count - a.pr_count)
+                : orgFilteredRepos;
 
             while (repoList.children.length > 1) repoList.removeChild(repoList.lastChild);
 
@@ -1166,10 +1216,16 @@
             
             dropdownList.innerHTML = '';
             
-            // Filter repos based on search term
-            const filteredRepos = searchTerm 
-                ? repos.filter(r => `${r.repo_owner}/${r.repo_name}`.toLowerCase().includes(searchTerm.toLowerCase()))
+            // Apply org mode filtering first
+            const currentOrg = getCurrentOrg();
+            const orgFilteredRepos = currentOrg
+                ? repos.filter(r => r.repo_owner === currentOrg)
                 : repos;
+
+            // Then filter repos based on search term
+            const filteredRepos = searchTerm 
+                ? orgFilteredRepos.filter(r => `${r.repo_owner}/${r.repo_name}`.toLowerCase().includes(searchTerm.toLowerCase()))
+                : orgFilteredRepos;
             
             // Add "All Repositories" option
             const allDiv = document.createElement('div');
