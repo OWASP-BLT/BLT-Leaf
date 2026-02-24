@@ -267,20 +267,59 @@
             opacity: 0.6;
         }
 
-        /* Scrollbars */
-        .dark ::-webkit-scrollbar {
-            background-color: #1e293b;
+        /* Scrollbars — thin red bar, hidden until the container is hovered */
+        aside::-webkit-scrollbar,
+        main::-webkit-scrollbar {
+            width: 4px;
         }
 
-        .dark ::-webkit-scrollbar-thumb {
-            background-color: #475569;
-            border-radius: 4px;
+        aside::-webkit-scrollbar-track,
+        main::-webkit-scrollbar-track {
+            background: transparent;
         }
 
-        .dark ::-webkit-scrollbar-thumb:hover {
-            background-color: #64748b;
+        aside::-webkit-scrollbar-thumb,
+        main::-webkit-scrollbar-thumb {
+            background-color: transparent;
+            border-radius: 2px;
+        }
+
+        aside:hover::-webkit-scrollbar-thumb,
+        main:hover::-webkit-scrollbar-thumb {
+            background-color: #E10000;
+        }
+
+        aside::-webkit-scrollbar-thumb:hover,
+        main::-webkit-scrollbar-thumb:hover {
+            background-color: #BC0000;
+        }
+
+        /* Firefox */
+        aside, main {
+            scrollbar-width: thin;
+            scrollbar-color: transparent transparent;
+        }
+
+        aside:hover, main:hover {
+            scrollbar-color: #E10000 transparent;
         }
         
+        /* Sidebar resize handle */
+        #sidebarResizeHandle {
+            width: 5px;
+            cursor: col-resize;
+            background: transparent;
+            flex-shrink: 0;
+            transition: background-color 0.15s ease;
+            position: relative;
+            z-index: 10;
+        }
+
+        #sidebarResizeHandle:hover,
+        #sidebarResizeHandle.dragging {
+            background-color: #E10000;
+        }
+
         /* Mobile autocomplete dropdown - responsive fallback */
         #repoList {
             display: none;
@@ -465,8 +504,8 @@
     </header>
 
     <div class="mx-auto flex min-h-0 w-full flex-1 flex-col md:flex-row">
-        <aside
-            class="w-full border-b border-slate-200 bg-white md:w-72 md:border-b-0 md:border-r dark:border-slate-700 dark:bg-slate-800 md:overflow-y-auto">
+        <aside id="sidebarPanel"
+            class="w-full border-b border-slate-200 bg-white md:border-b-0 md:border-r dark:border-slate-700 dark:bg-slate-800 md:overflow-y-auto" style="flex-shrink: 0;">
             <div class="p-4">
                 <!-- Org filter autocomplete -->
                 <div class="mb-3 relative" id="orgFilterContainer">
@@ -535,9 +574,12 @@
             </div>
         </aside>
 
+        <!-- Sidebar resize handle (desktop only) -->
+        <div id="sidebarResizeHandle" class="hidden md:block" title="Drag to resize sidebar"></div>
+
         <div class="flex flex-col flex-1 min-h-0">
-        <main class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-            <section class="mb-6 space-y-3">
+            <main class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+                <section class="mb-6 space-y-3">
                 <div class="flex w-full max-w-4xl flex-col gap-2 sm:flex-row">
                     <input type="text" id="prUrlInput"
                         class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-2 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-red-900/50"
@@ -3386,6 +3428,70 @@
                     '<span class="inline-block h-2 w-2 rounded-full bg-yellow-500"></span>' +
                     '<span class="text-yellow-600 dark:text-yellow-400">Unavailable</span>';
             }
+        })();
+    </script>
+
+    <!-- Sidebar resize logic -->
+    <script>
+        (function () {
+            const SIDEBAR_MIN = 160;
+            const SIDEBAR_MAX = 640;
+            const STORAGE_KEY = 'sidebarWidth';
+            const DEFAULT_WIDTH = 288;
+            const DESKTOP_BREAKPOINT = 768;
+
+            const sidebar = document.getElementById('sidebarPanel');
+            const handle = document.getElementById('sidebarResizeHandle');
+            if (!sidebar || !handle) return;
+
+            // Restore saved width on desktop
+            function applyWidth(w) {
+                sidebar.style.width = w + 'px';
+                localStorage.setItem(STORAGE_KEY, w);
+            }
+
+            function initWidth() {
+                if (window.innerWidth >= DESKTOP_BREAKPOINT) {
+                    const saved = parseInt(localStorage.getItem(STORAGE_KEY), 10);
+                    applyWidth(saved && saved >= SIDEBAR_MIN && saved <= SIDEBAR_MAX ? saved : DEFAULT_WIDTH);
+                } else {
+                    sidebar.style.width = '';
+                }
+            }
+
+            initWidth();
+            window.addEventListener('resize', initWidth);
+
+            // Drag logic
+            let dragging = false;
+            let startX = 0;
+            let startWidth = 0;
+
+            handle.addEventListener('mousedown', function (e) {
+                if (window.innerWidth < DESKTOP_BREAKPOINT) return;
+                dragging = true;
+                startX = e.clientX;
+                startWidth = sidebar.offsetWidth;
+                handle.classList.add('dragging');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', function (e) {
+                if (!dragging) return;
+                const delta = e.clientX - startX;
+                const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startWidth + delta));
+                applyWidth(newWidth);
+            });
+
+            document.addEventListener('mouseup', function () {
+                if (!dragging) return;
+                dragging = false;
+                handle.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            });
         })();
     </script>
 </body>
