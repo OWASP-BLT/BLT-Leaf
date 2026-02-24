@@ -2,7 +2,6 @@
 
 from js import Response, URL
 from workers import WorkerEntrypoint
-from posthog_client import PostHog
 from slack_notifier import notify_slack_exception, notify_slack_error
 
 # Import all handlers
@@ -28,11 +27,6 @@ class Default(WorkerEntrypoint):
     async def fetch(self, request):
         """Main request handler"""
         env = self.env
-        posthog = PostHog(
-            project_api_key=getattr(env, 'POSTHOG_API_KEY', ''),
-            host='https://us.i.posthog.com',
-            enable_exception_autocapture=True,
-        )
         slack_webhook = getattr(env, 'SLACK_ERROR_WEBHOOK', '')
 
         url = URL.new(request.url)
@@ -129,9 +123,9 @@ class Default(WorkerEntrypoint):
                 for key, value in cors_headers.items():
                     response.headers.set(key, value)
                 return response
-            # Test error endpoint — deliberately raises to verify PostHog error tracking
+            # Test error endpoint — deliberately raises to verify Slack error reporting
             elif path == '/api/test-error' and request.method == 'POST':
-                raise RuntimeError('PostHog test error — this exception was triggered intentionally from /api/test-error')
+                raise RuntimeError('Slack test error — this exception was triggered intentionally from /api/test-error')
             # Frontend client-error reporting endpoint
             elif path == '/api/client-error' and request.method == 'POST':
                 try:
@@ -191,13 +185,6 @@ class Default(WorkerEntrypoint):
 
         except Exception as exc:
             try:
-                await posthog.capture_exception(exc, context={
-                    'path': path,
-                    'method': str(request.method),
-                })
-            except Exception as posthog_err:
-                print(f'PostHog: failed to report exception: {posthog_err}')
-            try:
                 await notify_slack_exception(slack_webhook, exc, context={
                     'path': path,
                     'method': str(request.method),
@@ -216,4 +203,15 @@ class Default(WorkerEntrypoint):
         GraphQL batch API so that essential information stays current without
         consuming unnecessary GitHub API quota.
         """
-        await handle_scheduled_refresh(self.env)
+        env = self.env
+        slack_webhook = getattr(env, 'SLACK_ERROR_WEBHOOK', '')
+        try:
+            await handle_scheduled_refresh(env)
+        except Exception as exc:
+            try:
+                await notify_slack_exception(slack_webhook, exc, context={
+                    'handler': 'scheduled',
+                })
+            except Exception as slack_err:
+                print(f'Slack: failed to report scheduled exception: {slack_err}')
+            raise
