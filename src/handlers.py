@@ -261,7 +261,7 @@ async def handle_add_pr(request, env):
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
         )
 
-async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=None, sort_dir=None):
+async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=None, sort_dir=None, org_filter=None):
     """List PRs with pagination and sorting (default 30 per page)."""
     try:
         db = get_db(env)
@@ -281,10 +281,14 @@ async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=No
         params = []
 
         if repo_filter:
+            # repo_filter (owner/name) takes precedence over org_filter when both are provided
             parts = repo_filter.split('/')
             if len(parts) == 2:
                 base_query += ' AND repo_owner = ? AND repo_name = ?'
                 params.extend([parts[0], parts[1]])
+        elif org_filter:
+            base_query += ' AND repo_owner = ?'
+            params.append(org_filter)
 
         # Map frontend column names to database column names or SQL expressions
         # This allows the UI to use friendly names that map to actual DB columns
@@ -1473,42 +1477,14 @@ async def handle_pr_readiness(request, env, path):
     Calculate overall PR readiness combining CI and review health
     
     Features:
-    - Application-level rate limiting (10 requests/minute per IP)
     - Response caching (10 minutes TTL)
     - Cache invalidation on PR refresh
+    - No app-level rate limiting: the endpoint serves all PRs (including "Analyze All")
+      without artificial throttling. GitHub API rate limits still apply.
     """
     try:
         # Extract PR ID from path: /api/prs/123/readiness
         pr_id = path.split('/')[3]
-        
-        # Get client IP for rate limiting
-        # Try multiple headers to support different proxy configurations
-        client_ip = (
-            request.headers.get('cf-connecting-ip') or  # Cloudflare
-            (request.headers.get('x-forwarded-for') or '').split(',')[0].strip() or
-            request.headers.get('x-real-ip') or
-            'unknown'
-        )
-        
-        # Check rate limit
-        allowed, retry_after = check_rate_limit(client_ip)
-        if not allowed:
-            return Response.new(
-                json.dumps({
-                    'error': 'Rate limit exceeded',
-                    'message': f'Too many requests. Please try again in {retry_after} seconds.',
-                    'retry_after': retry_after
-                }),
-                {
-                    'status': 429,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Retry-After': str(retry_after),
-                        'X-RateLimit-Limit': str(_READINESS_RATE_LIMIT),
-                        'X-RateLimit-Window': str(_READINESS_RATE_WINDOW)
-                    }
-                }
-            )
         
         # Check cache first
         cached_result = await get_readiness_cache(env, pr_id)
