@@ -31,6 +31,268 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <style>
+        /* ── Layout: full-viewport fixed structure ─────────────────────── */
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* The row that holds sidebar + main */
+        #appLayout {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+        }
+
+        /* Sidebar: fixed width, independent scroll */
+        #repoSidebar {
+            width: 240px;
+            flex-shrink: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            height: 100%;
+            border-right: 1px solid #e2e8f0;
+            background: #fff;
+        }
+
+        .dark #repoSidebar {
+            background: #1e293b;
+            border-color: #334155;
+        }
+
+        /* Main content: flex-1, independent scroll */
+        #mainContent {
+            flex: 1;
+            min-width: 0;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* PR-url add-bar: fixed, never grows */
+        #addPrSection {
+            flex-shrink: 0;
+            padding: 10px 16px 8px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .dark #addPrSection {
+            border-color: #334155;
+        }
+
+        /* PR list fills remaining main height */
+        #prListContainer {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: auto;
+            padding: 10px 14px 12px;
+        }
+
+        /* ── Compact Table ─────────────────────────────────────────────── */
+        .pr-table {
+            width: 100%;
+            min-width: 1400px;
+            border-collapse: collapse;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        .pr-table thead th {
+            padding: 5px 8px !important;
+            white-space: nowrap;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .pr-table tbody td {
+            padding: 4px 8px !important;
+            vertical-align: middle;
+        }
+
+        /* Compact badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-style: solid;
+            padding: 1px 5px;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1.4;
+            white-space: nowrap;
+        }
+
+        .badge-emerald {
+            border-color: #6ee7b7;
+            background: #ecfdf5;
+            color: #065f46;
+        }
+
+        .dark .badge-emerald {
+            border-color: #064e3b;
+            background: rgba(6, 78, 59, 0.25);
+            color: #34d399;
+        }
+
+        .badge-red {
+            border-color: #fca5a5;
+            background: #fef2f2;
+            color: #991b1b;
+        }
+
+        .dark .badge-red {
+            border-color: #7f1d1d;
+            background: rgba(127, 29, 29, 0.25);
+            color: #f87171;
+        }
+
+        .badge-amber {
+            border-color: #fcd34d;
+            background: #fffbeb;
+            color: #92400e;
+        }
+
+        .dark .badge-amber {
+            border-color: #78350f;
+            background: rgba(120, 53, 15, 0.25);
+            color: #fbbf24;
+        }
+
+        .badge-slate {
+            border-color: #cbd5e1;
+            background: #f8fafc;
+            color: #475569;
+        }
+
+        .dark .badge-slate {
+            border-color: #475569;
+            background: rgba(51, 65, 85, 0.5);
+            color: #94a3b8;
+        }
+
+        /* Compact avatar */
+        .avatar-xs {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            border: 1px solid #e2e8f0;
+        }
+
+        .dark .avatar-xs {
+            border-color: #475569;
+        }
+
+        /* Compact score cells */
+        .score-val {
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .score-green {
+            color: #10b981;
+        }
+
+        .score-amber {
+            color: #f59e0b;
+        }
+
+        .score-red {
+            color: #ef4444;
+        }
+
+        .score-muted {
+            color: #94a3b8;
+        }
+
+        /* Compact toolbar */
+        .tbar-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            height: 28px;
+            padding: 0 8px;
+            border-radius: 5px;
+            border: 1px solid #e2e8f0;
+            background: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            color: #475569;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.1s;
+        }
+
+        .dark .tbar-btn {
+            border-color: #334155;
+            background: #1e293b;
+            color: #94a3b8;
+        }
+
+        .tbar-btn:hover {
+            background: #f1f5f9;
+        }
+
+        .dark .tbar-btn:hover {
+            background: #334155;
+        }
+
+        /* Remove mobile media queries that prevent repoList from showing on desktop */
+        #repoList {
+            display: block !important;
+        }
+
+        .mobile-repo-search {
+            display: none;
+        }
+
+        @media (max-width: 767px) {
+            #repoSidebar {
+                display: none;
+            }
+
+            #appLayout {
+                flex-direction: column;
+            }
+
+            #mainContent {
+                overflow-y: visible;
+                height: auto;
+            }
+
+            #prListContainer {
+                overflow-x: auto;
+            }
+
+            .mobile-repo-search {
+                display: block;
+            }
+        }
+
+        @media (max-width: 767px) {
+            #repoList {
+                display: none !important;
+            }
+        }
+
         /* Fallback visibility if CDN is blocked */
         .btn-fallback {
             background: #E10000;
@@ -40,12 +302,14 @@
 
         /* Active PR row highlighting */
         .pr-row-active {
-            background-color: #ffe4e6 !important; /* light red tint */
+            background-color: #ffe4e6 !important;
+            /* light red tint */
             border-left: 3px solid #ef4444;
         }
 
         .dark .pr-row-active {
-            background-color: rgba(220, 38, 38, 0.18) !important; /* soft red glow */
+            background-color: rgba(220, 38, 38, 0.18) !important;
+            /* soft red glow */
             border-left: 3px solid #ef4444;
         }
 
@@ -56,51 +320,68 @@
 
         /* Body and main containers */
         .dark body {
-            background-color: #0f172a !important; /* slate-900 */
-            color: #f1f5f9 !important; /* slate-100 */
+            background-color: #0f172a !important;
+            /* slate-900 */
+            color: #f1f5f9 !important;
+            /* slate-100 */
         }
 
         /* Header */
         .dark header {
-            background-color: #1e293b !important; /* slate-800 */
-            border-color: #334155 !important; /* slate-700 */
+            background-color: #1e293b !important;
+            /* slate-800 */
+            border-color: #334155 !important;
+            /* slate-700 */
         }
 
         /* Sidebar */
         .dark aside {
-            background-color: #1e293b !important; /* slate-800 */
-            border-color: #334155 !important; /* slate-700 */
+            background-color: #1e293b !important;
+            /* slate-800 */
+            border-color: #334155 !important;
+            /* slate-700 */
         }
 
         /* Cards and main content areas */
-        .dark main > div,
+        .dark main>div,
         .dark .bg-white {
-            background-color: #1e293b !important; /* slate-800 */
+            background-color: #1e293b !important;
+            /* slate-800 */
         }
 
         /* Text colors */
-        .dark h1, .dark h2, .dark h3, .dark h4, .dark h5, .dark h6 {
+        .dark h1,
+        .dark h2,
+        .dark h3,
+        .dark h4,
+        .dark h5,
+        .dark h6 {
             color: #ffffff !important;
         }
 
         .dark .text-slate-900 {
-            color: #f1f5f9 !important; /* slate-100 */
+            color: #f1f5f9 !important;
+            /* slate-100 */
         }
 
         .dark .text-slate-700 {
-            color: #cbd5e1 ; /* slate-300 */
+            color: #cbd5e1;
+            /* slate-300 */
         }
 
         .dark .text-slate-600 {
-            color: #cbd5e1 !important; /* slate-300 */
+            color: #cbd5e1 !important;
+            /* slate-300 */
         }
 
         .dark .text-slate-500 {
-            color: #94a3b8 !important; /* slate-400 */
+            color: #94a3b8 !important;
+            /* slate-400 */
         }
 
         .dark .text-slate-400 {
-            color: #94a3b8 !important; /* slate-400 */
+            color: #94a3b8 !important;
+            /* slate-400 */
         }
 
         /* Inputs and form elements */
@@ -111,151 +392,183 @@
         .dark input[type="url"],
         .dark textarea,
         .dark select {
-            background-color: #0f172a !important; /* slate-900 */
+            background-color: #0f172a !important;
+            /* slate-900 */
             color: #ffffff !important;
             border-color: #e74c3c !important;
         }
 
         .dark input::placeholder,
         .dark textarea::placeholder {
-            color: #94a3b8 !important; /* slate-400 */
+            color: #94a3b8 !important;
+            /* slate-400 */
         }
 
         .dark input:focus,
         .dark textarea:focus,
         .dark select:focus {
-            border-color: #ef4444 !important; /* red-500 */
+            border-color: #ef4444 !important;
+            /* red-500 */
             outline: none;
         }
 
         /* Buttons */
         .dark button:not(.bg-red-600):not([class*="bg-red"]):not([class*="bg-slate-500"]):not([class*="bg-green"]):not([class*="bg-blue"]) {
-            background-color: #475569 !important; /* slate-600 */
+            background-color: #475569 !important;
+            /* slate-600 */
             color: #f1f5f9 !important;
         }
 
         .dark button:hover:not(.bg-red-600):not([class*="bg-red"]):not([class*="bg-slate-500"]):not([class*="bg-green"]):not([class*="bg-blue"]) {
-            background-color: #334155 !important; /* slate-700 */
+            background-color: #334155 !important;
+            /* slate-700 */
         }
 
         /* Tables */
         .dark table {
-            border-color: #334155 !important; /* slate-700 */
+            border-color: #334155 !important;
+            /* slate-700 */
         }
 
         .dark th {
-            background-color: #1e293b !important; /* slate-800 */
+            background-color: #1e293b !important;
+            /* slate-800 */
             color: #f1f5f9 !important;
             border-color: #334155 !important;
         }
 
         .dark td {
-            border-color: #334155 !important; /* slate-700 */
-            color: #e2e8f0 !important; /* slate-200 */
+            border-color: #334155 !important;
+            /* slate-700 */
+            color: #e2e8f0 !important;
+            /* slate-200 */
         }
 
         .dark tr:hover {
-            background-color: #334155 !important; /* slate-700 */
+            background-color: #334155 !important;
+            /* slate-700 */
         }
 
         /* Borders */
         .dark .border,
         .dark [class*="border-"] {
-            border-color: #334155 !important; /* slate-700 */
+            border-color: #334155 !important;
+            /* slate-700 */
         }
 
         .dark .border-slate-200 {
-            border-color: #334155 !important; /* slate-700 */
+            border-color: #334155 !important;
+            /* slate-700 */
         }
 
-        .dark .divide-y > * {
-            border-color: #334155 !important; /* slate-700 */
+        .dark .divide-y>* {
+            border-color: #334155 !important;
+            /* slate-700 */
         }
 
         /* Hover states */
         .dark .hover\:bg-slate-100:hover,
         .dark [class*="hover:bg-slate-100"]:hover {
-            background-color: #334155 !important; /* slate-700 */
+            background-color: #334155 !important;
+            /* slate-700 */
         }
 
         .dark .hover\:bg-slate-50:hover {
-            background-color: #1e293b !important; /* slate-800 */
+            background-color: #1e293b !important;
+            /* slate-800 */
         }
 
         /* Status badges and alerts */
         .dark .bg-slate-50 {
-            background-color: #0f172a !important; /* slate-900 */
+            background-color: #0f172a !important;
+            /* slate-900 */
         }
 
         .dark .bg-slate-100 {
-            background-color: #1e293b !important; /* slate-800 */
+            background-color: #1e293b !important;
+            /* slate-800 */
         }
 
         .dark .bg-slate-200 {
-            background-color: #334155 !important; /* slate-700 */
+            background-color: #334155 !important;
+            /* slate-700 */
         }
 
         /* Special background colors for status indicators */
         .dark .bg-green-50 {
-            background-color: rgba(6, 78, 59, 0.3) !important; /* emerald-950/30 */
+            background-color: rgba(6, 78, 59, 0.3) !important;
+            /* emerald-950/30 */
         }
 
         .dark .bg-red-50 {
-            background-color: rgba(69, 10, 10, 0.3) !important; /* red-950/30 */
+            background-color: rgba(69, 10, 10, 0.3) !important;
+            /* red-950/30 */
         }
 
         .dark .bg-amber-50,
         .dark .bg-yellow-50 {
-            background-color: rgba(69, 26, 3, 0.3) !important; /* amber-950/30 */
+            background-color: rgba(69, 26, 3, 0.3) !important;
+            /* amber-950/30 */
         }
 
         /* Text colors for status indicators */
         .dark .text-green-700,
         .dark .text-green-600 {
-            color: #4ade80 !important; /* green-400 */
+            color: #4ade80 !important;
+            /* green-400 */
         }
 
         .dark .text-emerald-700,
         .dark .text-emerald-600 {
-            color: #34d399 !important; /* emerald-400 */
+            color: #34d399 !important;
+            /* emerald-400 */
         }
 
         .dark .text-red-700,
         .dark .text-red-600 {
-            color: #f87171 !important; /* red-400 */
+            color: #f87171 !important;
+            /* red-400 */
         }
 
         .dark .text-amber-700,
         .dark .text-amber-600,
         .dark .text-yellow-700 {
-            color: #fbbf24 !important; /* amber-400 */
+            color: #fbbf24 !important;
+            /* amber-400 */
         }
 
         .dark .text-orange-700,
         .dark .text-orange-600 {
-            color: #fb923c !important; /* orange-400 */
+            color: #fb923c !important;
+            /* orange-400 */
         }
 
         .dark .text-blue-700,
         .dark .text-blue-600 {
-            color: #60a5fa !important; /* blue-400 */
+            color: #60a5fa !important;
+            /* blue-400 */
         }
 
         /* Links */
         .dark a {
-            color: #60a5fa !important; /* blue-400 */
+            color: #60a5fa !important;
+            /* blue-400 */
         }
 
         .dark a:hover {
-            color: #93c5fd !important; /* blue-300 */
+            color: #93c5fd !important;
+            /* blue-300 */
         }
 
         /* Disabled states */
         .dark button:disabled,
         .dark input:disabled {
-            background-color: #450a0a !important; /* red-950 */
-            border-color: #991b1b !important; /* red-800 */
-            color: #f87171 !important; /* red-400 */
+            background-color: #450a0a !important;
+            /* red-950 */
+            border-color: #991b1b !important;
+            /* red-800 */
+            color: #f87171 !important;
+            /* red-400 */
             opacity: 0.6;
         }
 
@@ -272,29 +585,10 @@
         .dark ::-webkit-scrollbar-thumb:hover {
             background-color: #64748b;
         }
-        
-        /* Mobile autocomplete dropdown - responsive fallback */
-        #repoList {
-            display: none;
-        }
-        
-        .mobile-repo-search {
-            display: block;
-        }
-        
-        @media (min-width: 768px) {
-            #repoList {
-                display: block;
-            }
-            
-            .mobile-repo-search {
-                display: none;
-            }
-        }
     </style>
 </head>
 
-<body class="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
+<body class="bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
     <header class="sticky top-0 z-30 border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
         <div class="mx-auto px-4 sm:px-6 lg:px-8">
             <!-- Mobile: Compact two-line layout -->
@@ -305,7 +599,7 @@
                         <img width="20" src="./static/logo.png" alt="Logo" onerror="this.style.display='none'" />
                         <h1 class="text-xs font-bold text-slate-900 dark:text-white">BLT-LEAF</h1>
                     </a>
-                    
+
                     <div class="flex items-center gap-1.5">
                         <button id="autoRefreshToggle"
                             class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
@@ -322,13 +616,12 @@
                             <i class="fas fa-question-circle text-xs"></i>
                         </a>
                         <a href="https://github.com/OWASP-BLT/BLT-Leaf" target="_blank" rel="noopener noreferrer"
-                            class="rounded-lg bg-red-600 p-1.5 text-white hover:bg-red-700"
-                            title="Contribute">
+                            class="rounded-lg bg-red-600 p-1.5 text-white hover:bg-red-700" title="Contribute">
                             <i class="fab fa-github text-xs"></i>
                         </a>
                     </div>
                 </div>
-                
+
                 <!-- Second line: Search bar and API limit -->
                 <div class="flex items-center gap-1.5">
                     <div class="relative flex-1">
@@ -358,9 +651,11 @@
                         <h1 class="text-sm font-bold text-slate-900 dark:text-white sm:text-base">BLT-LEAF</h1>
                     </a>
 
-                    <div class="flex items-center gap-1 sm:gap-2 pl-3 sm:pl-4 border-l border-slate-200 dark:border-slate-700 h-8">
+                    <div
+                        class="flex items-center gap-1 sm:gap-2 pl-3 sm:pl-4 border-l border-slate-200 dark:border-slate-700 h-8">
                         <span class="text-[10px] font-medium text-slate-500 dark:text-slate-400">API Limit:</span>
-                        <div class="rate-limit-bar h-1.5 w-20 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                        <div
+                            class="rate-limit-bar h-1.5 w-20 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
                             <div class="h-full w-0 rounded-full bg-green-500 transition-all duration-300"
                                 id="rateLimitFill"></div>
                         </div>
@@ -408,8 +703,7 @@
                         <i class="fas fa-question-circle"></i>
                         <span class="hidden sm:inline">How It Works</span>
                     </a>
-                    <span id="releaseVersion"
-                        class="text-xs text-slate-500 dark:text-slate-400 inline-block"></span>
+                    <span id="releaseVersion" class="text-xs text-slate-500 dark:text-slate-400 inline-block"></span>
                     <a href="https://github.com/OWASP-BLT/BLT-Leaf" target="_blank" rel="noopener noreferrer"
                         class="rounded-lg bg-red-600 px-2 sm:px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 inline-flex items-center gap-2 transition-colors shadow-sm"
                         title="Contribute">
@@ -420,36 +714,38 @@
         </div>
     </header>
 
-    <div class="mx-auto flex min-h-0 w-full flex-1 flex-col md:flex-row">
-        <aside
-            class="w-full border-b border-slate-200 bg-white md:w-72 md:border-b-0 md:border-r dark:border-slate-700 dark:bg-slate-800">
+    <div id="appLayout">
+        <aside id="repoSidebar">
             <div class="p-4">
-                <h2 class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Repositories <span id="repoCountDisplay"></span></h2>
-                
+                <h2 class="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    Repositories <span id="repoCountDisplay"></span></h2>
+
                 <!-- Mobile: Dropdown with search -->
                 <div class="mobile-repo-search mb-2 md:hidden">
                     <div class="relative">
                         <button type="button" id="repoDropdownButton"
                             class="w-full flex items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 hover:bg-slate-50 focus:border-[#E10000] focus:outline-none focus:ring-2 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 dark:focus:ring-red-900/50">
                             <span id="repoDropdownText" class="truncate">Select repository...</span>
-                            <svg class="ml-2 h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            <svg class="ml-2 h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 9l-7 7-7-7"></path>
                             </svg>
                         </button>
-                        
+
                         <!-- Dropdown menu -->
-                        <div id="repoDropdownMenu" class="hidden absolute z-10 mt-1 w-full rounded-lg border border-slate-300 bg-white shadow-lg dark:border-slate-600 dark:bg-slate-700">
+                        <div id="repoDropdownMenu"
+                            class="hidden absolute z-10 mt-1 w-full rounded-lg border border-slate-300 bg-white shadow-lg dark:border-slate-600 dark:bg-slate-700">
                             <div class="p-2 border-b border-slate-200 dark:border-slate-600">
                                 <input type="text" id="repoSearchInput"
                                     class="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-1 focus:ring-[#E10000] dark:border-slate-500 dark:bg-slate-600 dark:text-slate-100 dark:placeholder:text-slate-400"
-                                    placeholder="Search repositories..."
-                                    autocomplete="off" />
+                                    placeholder="Search repositories..." autocomplete="off" />
                             </div>
                             <div id="repoDropdownList" class="max-h-60 overflow-y-auto"></div>
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Desktop: List view -->
                 <ul id="repoList" class="space-y-2">
                     <li class="repo-item active cursor-pointer rounded-lg border border-[#f5b0b0] bg-[#fff1f1] px-3 py-2 dark:border-red-900 dark:bg-red-950/30"
@@ -463,24 +759,21 @@
             </div>
         </aside>
 
-        <main class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-            <section class="mb-6 space-y-3">
-                <div class="flex w-full max-w-4xl flex-col gap-2 sm:flex-row">
+        <main id="mainContent">
+            <section id="addPrSection">
+                <div class="flex w-full max-w-3xl gap-2">
                     <input type="text" id="prUrlInput"
-                        class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-2 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-red-900/50"
-                        placeholder="Enter GitHub PR URL or Repository URL" autocomplete="off" />
+                        class="flex-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-1 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500"
+                        placeholder="GitHub PR URL or Repository URL" autocomplete="off" />
                     <button id="addPrBtn"
-                        class="btn-fallback w-[6rem] rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-[#BC0000] disabled:cursor-not-allowed disabled:border-red-300 disabled:bg-red-200 disabled:text-red-700 dark:disabled:border-red-800 dark:disabled:bg-red-950 dark:disabled:text-red-400">
+                        class="btn-fallback rounded px-4 py-1.5 text-sm font-semibold transition-colors hover:bg-[#BC0000] disabled:cursor-not-allowed disabled:opacity-60">
                         Add PR
                     </button>
-                </div>
-
-                <div class="mt-2 flex items-center gap-2">
-                    <input type="checkbox" id="addAllPrsCheckbox"
-                        class="h-4 w-4 rounded border-slate-300 text-[#E10000] focus:ring-[#E10000] dark:border-slate-600 dark:bg-slate-700">
-                    <label for="addAllPrsCheckbox"
-                        class="text-sm text-slate-600 dark:text-slate-400 cursor-pointer select-none">
-                        Add all active PRs from this repo
+                    <label
+                        class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 cursor-pointer select-none">
+                        <input type="checkbox" id="addAllPrsCheckbox"
+                            class="h-3.5 w-3.5 rounded border-slate-300 text-[#E10000] focus:ring-[#E10000] dark:border-slate-600 dark:bg-slate-700">
+                        Add all PRs
                     </label>
                 </div>
             </section>
@@ -497,25 +790,31 @@
     </div>
 
     <!-- Raw Data Modal -->
-    <div id="rawDataModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div class="relative w-full max-w-4xl max-h-[90vh] m-4 bg-white dark:bg-slate-800 rounded-lg shadow-2xl flex flex-col">
+    <div id="rawDataModal"
+        class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div
+            class="relative w-full max-w-4xl max-h-[90vh] m-4 bg-white dark:bg-slate-800 rounded-lg shadow-2xl flex flex-col">
             <!-- Modal Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
                 <h2 class="text-xl font-semibold text-slate-900 dark:text-slate-100">Raw PR Data</h2>
-                <button id="closeRawDataModal" class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 transition-colors">
+                <button id="closeRawDataModal"
+                    class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 transition-colors">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <!-- Modal Body -->
             <div class="flex-1 overflow-auto px-6 py-4">
-                <pre id="rawDataContent" class="text-xs text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 p-4 rounded-lg overflow-x-auto"><code></code></pre>
+                <pre id="rawDataContent"
+                    class="text-xs text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 p-4 rounded-lg overflow-x-auto"><code></code></pre>
             </div>
             <!-- Modal Footer -->
             <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700">
-                <button id="copyRawDataBtn" class="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 transition-colors shadow-sm">
+                <button id="copyRawDataBtn"
+                    class="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 transition-colors shadow-sm">
                     <i class="fas fa-copy mr-1"></i>Copy to Clipboard
                 </button>
-                <button id="closeRawDataModalBtn" class="rounded-md bg-slate-500 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors shadow-sm">
+                <button id="closeRawDataModalBtn"
+                    class="rounded-md bg-slate-500 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors shadow-sm">
                     Close
                 </button>
             </div>
@@ -1016,14 +1315,14 @@
         function updateMobileDropdown(searchTerm = '') {
             const dropdownList = document.getElementById('repoDropdownList');
             if (!dropdownList) return;
-            
+
             dropdownList.innerHTML = '';
-            
+
             // Filter repos based on search term
-            const filteredRepos = searchTerm 
+            const filteredRepos = searchTerm
                 ? repos.filter(r => `${r.repo_owner}/${r.repo_name}`.toLowerCase().includes(searchTerm.toLowerCase()))
                 : repos;
-            
+
             // Add "All Repositories" option
             const allDiv = document.createElement('div');
             allDiv.className = 'px-3 py-2 text-sm cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600';
@@ -1038,7 +1337,7 @@
             `;
             allDiv.addEventListener('click', () => selectRepo('all'));
             dropdownList.appendChild(allDiv);
-            
+
             // Add individual repositories
             filteredRepos.forEach(repo => {
                 const div = document.createElement('div');
@@ -1054,7 +1353,7 @@
                 div.addEventListener('click', () => selectRepo(div.dataset.repo));
                 dropdownList.appendChild(div);
             });
-            
+
             // Show "No results" if search returns nothing
             if (searchTerm && filteredRepos.length === 0 && !searchTerm.toLowerCase().includes('all')) {
                 const noResults = document.createElement('div');
@@ -1127,7 +1426,7 @@
                 }
 
                 const response = await fetch(url);
-                
+
                 // Check if the HTTP request was successful
                 if (!response.ok) {
                     let errorMessage = 'Failed to load PRs';
@@ -1206,7 +1505,7 @@
                 }
             } catch (error) {
                 console.error('Error loading PRs:', error);
-                
+
                 // Provide more specific error messages
                 let errorMessage = 'Failed to load PRs';
                 if (error.name === 'TypeError' && error.message.includes('fetch')) {
@@ -1219,7 +1518,7 @@
                     // Show the actual error message if available
                     errorMessage = `Error: ${error.message}`;
                 }
-                
+
                 showContainerError('prListContainer', errorMessage);
             }
         }
@@ -1407,21 +1706,20 @@
         function showRawDataModal(prId) {
             const modal = document.getElementById('rawDataModal');
             const content = document.getElementById('rawDataContent').querySelector('code');
-            
+
             // Find the specific PR data
             const prData = allPrs.find(pr => pr.id === prId);
-            
+
             if (!prData) {
                 console.error('PR not found:', prId);
                 return;
             }
-            
+
             // Format as pretty JSON
             content.textContent = JSON.stringify(prData, null, 2);
-            
+
             // Show modal
             modal.classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
         }
 
         /**
@@ -1430,7 +1728,6 @@
         function hideRawDataModal() {
             const modal = document.getElementById('rawDataModal');
             modal.classList.add('hidden');
-            document.body.style.overflow = '';
         }
 
         /**
@@ -1522,22 +1819,22 @@
             };
 
             container.innerHTML = `
-                <div class="mb-2 flex gap-2">
+                <div class="mb-2 flex gap-1.5">
                     <button 
                         id="clearSortBtn" 
-                        class="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600"
+                        class="tbar-btn"
                         title="Clear all sorting and reset to default (Ready Score)">
                         <i class="fas fa-times-circle"></i> Clear Sort
                     </button>
                     <button 
                         id="sortByReadinessBtn" 
-                        class="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600"
+                        class="tbar-btn"
                         title="Sort by Readiness Score (Ready column)">
-                        <i class="fas fa-sort-amount-down"></i> Sort by Readiness
+                        <i class="fas fa-sort-amount-down"></i> Readiness
                     </button>
                 </div>
-                <div class="rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800" style="overflow-x: auto;">
-                    <table class="w-full text-left text-sm" style="min-width: 1920px;">
+                <div class="rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800" style="overflow-x: auto;">
+                    <table class="pr-table text-left">
                         <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
                             <tr>
                                 <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="author_login" style="min-width: 100px;" title="Click to sort by Author. Shift+Click to add to sort columns.&#10;API: GET /repos/{owner}/{repo}/pulls/{pr_number} (user.login field)">
@@ -1718,14 +2015,14 @@
                     await updatePr(prId, e.currentTarget);
                 });
             });
-            
+
             document.querySelectorAll('.view-raw-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     const prId = parseInt(e.currentTarget.dataset.prId, 10);
                     showRawDataModal(prId);
                 });
             });
-            
+
             if (document.getElementById('prSearchInput').value.trim() === '') {
                 renderPagination();
             }
@@ -1799,18 +2096,18 @@
                     loadPrs();
                 }
             });
-            
+
             // Handle page size change
             document.getElementById('pageSizeSelect')?.addEventListener('change', (e) => {
                 const newPerPage = parseInt(e.target.value, 10);
-                
+
                 // Validate the new page size to guard against DOM manipulation
                 if (Number.isNaN(newPerPage) || newPerPage < 10 || newPerPage > 1000) {
                     // Revert the select value to the current perPage if invalid
                     e.target.value = perPage.toString();
                     return;
                 }
-                
+
                 if (newPerPage !== perPage) {
                     perPage = newPerPage;
                     localStorage.setItem('perPage', perPage.toString());
@@ -1939,11 +2236,11 @@
                 </td>
                 <td class="px-2 py-3 text-xs text-slate-600 dark:text-slate-400 truncate">${escapeHtml(timeAgo(pr.last_updated_at))}</td>
                 <td class="px-2 py-3 text-center">
-                    <div class="flex items-center justify-center gap-2">
-                        <button class="update-btn rounded-md border border-[#E10000] bg-white px-3 py-2 text-xs font-semibold text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30" data-pr-id="${pr.id}" title="Update PR data and analyze readiness">
-                            <i class="fas fa-sync mr-1"></i>Update
+                    <div class="flex items-center justify-center gap-1.5">
+                        <button class="update-btn rounded border border-[#E10000] bg-white px-2 py-1 text-[10px] font-semibold text-[#E10000] hover:bg-[#fff1f1] dark:border-red-700 dark:bg-slate-700 dark:text-red-400 dark:hover:bg-red-950/30" data-pr-id="${pr.id}" title="Update PR data and analyze readiness">
+                            <i class="fas fa-sync mr-0.5"></i>Update
                         </button>
-                        <button class="view-raw-btn rounded-md border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600" data-pr-id="${pr.id}" title="View raw PR data">
+                        <button class="view-raw-btn rounded border border-slate-300 bg-white px-1.5 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600" data-pr-id="${pr.id}" title="View raw PR data">
                             <i class="fas fa-database"></i>
                         </button>
                     </div>
@@ -2003,7 +2300,7 @@
                     await updatePr(prId, e.currentTarget);
                 });
             }
-            
+
             // Re-attach the click event listener to the view raw button
             const viewRawBtn = newRow.querySelector('.view-raw-btn');
             if (viewRawBtn) {
@@ -2293,7 +2590,7 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         pr_url: repoUrl,
                         add_all: true
                     })
@@ -2327,12 +2624,12 @@
         document.querySelectorAll('#themeToggle').forEach(btn => {
             btn.addEventListener('click', toggleTheme);
         });
-        
+
         // Auto-refresh toggle - handle both mobile and desktop buttons
         document.querySelectorAll('#autoRefreshToggle').forEach(btn => {
             btn.addEventListener('click', toggleAutoRefresh);
         });
-        
+
         // Search input - sync both mobile and desktop inputs
         document.querySelectorAll('#prSearchInput').forEach(input => {
             input.addEventListener('input', (e) => {
@@ -2345,7 +2642,7 @@
                     }
                 });
             });
-            
+
             // Allow Enter key to trigger search
             input.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
@@ -2392,7 +2689,7 @@
         const repoDropdownButton = document.getElementById('repoDropdownButton');
         const repoDropdownMenu = document.getElementById('repoDropdownMenu');
         const repoSearchInput = document.getElementById('repoSearchInput');
-        
+
         if (repoDropdownButton && repoDropdownMenu) {
             // Toggle dropdown on button click
             repoDropdownButton.addEventListener('click', (e) => {
@@ -2407,19 +2704,19 @@
                     closeDropdown();
                 }
             });
-            
+
             // Handle search input
             if (repoSearchInput) {
                 repoSearchInput.addEventListener('input', (e) => {
                     updateMobileDropdown(e.target.value);
                 });
-                
+
                 // Prevent dropdown from closing when clicking search input
                 repoSearchInput.addEventListener('click', (e) => {
                     e.stopPropagation();
                 });
             }
-            
+
             // Close dropdown when clicking outside
             document.addEventListener('click', (e) => {
                 if (!repoDropdownButton.contains(e.target) && !repoDropdownMenu.contains(e.target)) {
@@ -2468,14 +2765,14 @@
         document.getElementById('closeRawDataModal').addEventListener('click', hideRawDataModal);
         document.getElementById('closeRawDataModalBtn').addEventListener('click', hideRawDataModal);
         document.getElementById('copyRawDataBtn').addEventListener('click', copyRawDataToClipboard);
-        
+
         // Close modal when clicking outside
         document.getElementById('rawDataModal').addEventListener('click', (e) => {
             if (e.target.id === 'rawDataModal') {
                 hideRawDataModal();
             }
         });
-        
+
         // Close modal on Escape key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
@@ -2548,15 +2845,20 @@
             <div class="space-y-4">
                 <p class="text-sm text-slate-700 leading-relaxed dark:text-slate-300">
                     Leaf is a Readiness and Security PR checker. It reviews pull requests for operational readiness,
-                    security risks, and production-impacting changes before they ship. Inspired by the surge of AI-generated
-                    PRs, Leaf helps teams maintain high standards by adding an automated layer of critical thinking and risk
+                    security risks, and production-impacting changes before they ship. Inspired by the surge of
+                    AI-generated
+                    PRs, Leaf helps teams maintain high standards by adding an automated layer of critical thinking and
+                    risk
                     detection to every change.
                 </p>
                 <p class="text-sm font-medium text-slate-600 dark:text-slate-400">
                     🔒 Security features are coming soon!
                 </p>
                 <div class="pt-2 text-xs text-slate-500 dark:text-slate-500">
-                    <p>Part of the <a href="https://owasp.org/www-project-bug-logging-tool/" target="_blank" rel="noopener noreferrer" class="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">OWASP Bug Logging Tool (BLT)</a> project</p>
+                    <p>Part of the <a href="https://owasp.org/www-project-bug-logging-tool/" target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">OWASP Bug
+                            Logging Tool (BLT)</a> project</p>
                 </div>
             </div>
         </div>
