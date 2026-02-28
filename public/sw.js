@@ -4,6 +4,7 @@ const CACHE_VERSION = 'blt-leaf-v2';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 const CDN_CACHE = `${CACHE_VERSION}-cdn`;
+const IS_LOCAL_DEV = self.location.hostname === '127.0.0.1' || self.location.hostname === 'localhost';
 
 // Static assets to precache on install
 const PRECACHE_URLS = [
@@ -33,6 +34,10 @@ const API_CACHE_MAX_AGE = 5 * 60 * 1000;
 
 // Install
 self.addEventListener('install', (event) => {
+    if (IS_LOCAL_DEV) {
+        event.waitUntil(self.skipWaiting());
+        return;
+    }
     event.waitUntil(
         caches.open(STATIC_CACHE)
             .then((cache) => cache.addAll(PRECACHE_URLS))
@@ -46,6 +51,14 @@ self.addEventListener('install', (event) => {
 
 // Activate
 self.addEventListener('activate', (event) => {
+    if (IS_LOCAL_DEV) {
+        event.waitUntil(
+            caches.keys()
+                .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+                .then(() => self.clients.claim())
+        );
+        return;
+    }
     event.waitUntil(
         caches.keys().then((keys) =>
             Promise.all(
@@ -63,6 +76,20 @@ self.addEventListener('fetch', (event) => {
 
     // Only handle GET requests
     if (request.method !== 'GET') return;
+
+    // In local dev, bypass SW cache for static assets to avoid stale JS/CSS/HTML/sw.js.
+    if (IS_LOCAL_DEV &&
+        url.origin === self.location.origin &&
+        (
+            url.pathname === '/' ||
+            url.pathname === '/sw.js' ||
+            url.pathname.endsWith('.js') ||
+            url.pathname.endsWith('.css') ||
+            url.pathname.endsWith('.html')
+        )) {
+        event.respondWith(fetch(request, { cache: 'no-store' }));
+        return;
+    }
 
     // CDN resources
     if (CDN_ORIGINS.some((origin) => request.url.startsWith(origin))) {

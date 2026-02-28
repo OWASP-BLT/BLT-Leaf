@@ -10,24 +10,6 @@
     <link rel="preconnect" href="https://cdn.tailwindcss.com">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        window.tailwind = {
-            config: {
-                darkMode: 'class'
-            }
-        };
-
-        // Initialize theme immediately to prevent FOUC
-        (function () {
-            const savedTheme = localStorage.getItem('theme');
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            const theme = savedTheme || (prefersDark ? 'dark' : 'light');
-
-            if (theme === 'dark') {
-                document.documentElement.classList.add('dark');
-            }
-        })();
-    </script>
     <script src="error-reporter.js"></script>
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
@@ -328,9 +310,9 @@
                             title="Toggle auto-refresh">
                             <i class="fas fa-sync-alt text-xs" id="autoRefreshIcon"></i>
                         </button>
-                        <button id="themeToggle"
+                        <button data-theme-toggle
                             class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700">
-                            <i class="fas fa-moon text-xs" id="themeIcon"></i>
+                            <i class="fas fa-moon text-xs" data-theme-icon></i>
                         </button>
                         <a href="/how-it-works.html"
                             class="inline-flex items-center rounded-lg p-1.5 text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
@@ -425,9 +407,9 @@
                         title="Toggle auto-refresh">
                         <i class="fas fa-sync-alt" id="autoRefreshIcon"></i>
                     </button>
-                    <button id="themeToggle"
+                    <button data-theme-toggle
                         class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:text-slate-400 dark:hover:bg-slate-700 dark:focus:ring-slate-600">
-                        <i class="fas fa-moon" id="themeIcon"></i>
+                        <i class="fas fa-moon" data-theme-icon></i>
                     </button>
                     <a href="/how-it-works.html"
                         class="inline-flex items-center gap-2 rounded-lg px-2 sm:px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 transition-colors"
@@ -3142,10 +3124,7 @@
             }
         }
 
-        // Theme toggle - handle both mobile and desktop buttons
-        document.querySelectorAll('#themeToggle').forEach(btn => {
-            btn.addEventListener('click', toggleTheme);
-        });
+        // Theme handled by shared theme.js
         
         // Auto-refresh toggle - handle both mobile and desktop buttons
         document.querySelectorAll('#autoRefreshToggle').forEach(btn => {
@@ -3248,41 +3227,7 @@
             });
         }
 
-        // Theme toggle functionality
-        function initTheme() {
-            // Theme class is already set in the head, just update the icon
-            const isDark = document.documentElement.classList.contains('dark');
-            const themeIcons = document.querySelectorAll('#themeIcon');
 
-            if (isDark) {
-                themeIcons.forEach(icon => {
-                    icon.className = 'fas fa-sun' + (icon.classList.contains('text-xs') ? ' text-xs' : '');
-                });
-            } else {
-                themeIcons.forEach(icon => {
-                    icon.className = 'fas fa-moon' + (icon.classList.contains('text-xs') ? ' text-xs' : '');
-                });
-            }
-        }
-
-        function toggleTheme() {
-            const isDark = document.documentElement.classList.contains('dark');
-            const themeIcons = document.querySelectorAll('#themeIcon');
-
-            if (isDark) {
-                document.documentElement.classList.remove('dark');
-                themeIcons.forEach(icon => {
-                    icon.className = 'fas fa-moon' + (icon.classList.contains('text-xs') ? ' text-xs' : '');
-                });
-                localStorage.setItem('theme', 'light');
-            } else {
-                document.documentElement.classList.add('dark');
-                themeIcons.forEach(icon => {
-                    icon.className = 'fas fa-sun' + (icon.classList.contains('text-xs') ? ' text-xs' : '');
-                });
-                localStorage.setItem('theme', 'dark');
-            }
-        }
 
         // Raw data modal event listeners
         document.getElementById('closeRawDataModal').addEventListener('click', hideRawDataModal);
@@ -3543,7 +3488,6 @@
             }
         }
 
-        initTheme();
         loadRateLimit();
         loadLatestRelease();
         // initOrgFilter sets up event listeners only; dropdown items are populated from `repos`
@@ -3564,9 +3508,21 @@
 
         // Service Worker Registration
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js')
-                .then(reg => console.log('SW Registered:', reg.scope))
-                .catch(err => console.warn('SW Registration failed:', err));
+            const isLocalDev = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+            if (isLocalDev) {
+                navigator.serviceWorker.getRegistrations()
+                    .then(registrations => Promise.all(registrations.map(reg => reg.unregister())))
+                    .catch(err => console.warn('SW unregister failed:', err));
+                if ('caches' in window) {
+                    caches.keys()
+                        .then(keys => Promise.all(keys.map(key => caches.delete(key))))
+                        .catch(err => console.warn('Cache clear failed:', err));
+                }
+            } else {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('SW Registered:', reg.scope))
+                    .catch(err => console.warn('SW Registration failed:', err));
+            }
         }
     </script>
 
@@ -3631,6 +3587,7 @@
             }
         })();
     </script>
+    <script src="theme.js"></script>
 </body>
 
 </html>
