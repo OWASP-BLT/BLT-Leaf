@@ -2611,13 +2611,14 @@
                     const authorLogin = conflictMessageBtn.dataset.authorLogin;
                     const authorMention = authorLogin && /^[a-zA-Z0-9_.-]+$/.test(authorLogin) ? `@${authorLogin}` : 'contributor';
                     const message = `Hi ${authorMention}, this PR has merge conflicts that need to be resolved before it can be merged. Could you please fix the conflicts? Thank you!`;
+                    const prUrlWithComment = `${prUrl}?expand=1&body=${encodeURIComponent(message)}`;
                     try {
                         await navigator.clipboard.writeText(message);
-                        showSuccessToast('Conflict message copied to clipboard! Opening PR...');
+                        showSuccessToast('Opening PR with conflict message pre-filled...');
                     } catch (err) {
                         console.error('Failed to copy conflict message:', err);
                     }
-                    window.open(prUrl, '_blank', 'noopener,noreferrer');
+                    window.open(prUrlWithComment, '_blank', 'noopener,noreferrer');
                 });
             }
 
