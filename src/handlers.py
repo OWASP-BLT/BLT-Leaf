@@ -23,6 +23,7 @@ from github_api import (
     fetch_pr_data, fetch_pr_timeline_data, fetch_paginated_data,
     verify_github_signature, fetch_multiple_prs_batch, fetch_org_repos
 )
+from slack_notifier import notify_slack_exception, notify_slack_error
 
 # SQL expression for computed field: issues_count
 # Calculates total issues as sum of blockers and warnings from JSON columns
@@ -256,12 +257,13 @@ async def handle_add_pr(request, env):
     except Exception as e:
         # Generic error message to prevent information disclosure
         print(f"Internal error in handle_add_pr: {type(e).__name__}: {str(e)}")
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_add_pr'})
         return Response.new(
             json.dumps({'error': 'Internal server error'}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
         )
 
-async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=None, sort_dir=None, org_filter=None):
+async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=None, sort_dir=None, org_filter=None, author_filter=None):
     """List PRs with pagination and sorting (default 30 per page)."""
     try:
         db = get_db(env)
@@ -289,6 +291,10 @@ async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=No
         elif org_filter:
             base_query += ' AND repo_owner = ?'
             params.append(org_filter)
+
+        if author_filter:
+            base_query += ' AND author_login = ?'
+            params.append(author_filter)
 
         # Map frontend column names to database column names or SQL expressions
         # This allows the UI to use friendly names that map to actual DB columns
@@ -407,6 +413,7 @@ async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=No
         }})
 
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_list_prs'})
         return Response.new(
             json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
@@ -437,8 +444,36 @@ async def handle_list_repos(env):
                               'Cache-Control': 'public, max-age=60, stale-while-revalidate=300'
                           }})
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_list_repos'})
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+
+async def handle_list_authors(env):
+    """List all unique PR authors (including bots) with count of open PRs"""
+    try:
+        db = get_db(env)
+        stmt = db.prepare('''
+            SELECT author_login, COUNT(*) as pr_count,
+                   MAX(author_avatar) as author_avatar
+            FROM prs
+            WHERE is_merged = 0 AND state = 'open' AND author_login IS NOT NULL AND author_login != ''
+            GROUP BY author_login
+            ORDER BY author_login ASC
+        ''')
+
+        result = await stmt.all()
+        authors = result.results.to_py() if hasattr(result, 'results') else []
+
+        return Response.new(json.dumps({'authors': authors}),
+                          {'headers': {
+                              'Content-Type': 'application/json',
+                              'Cache-Control': 'public, max-age=60, stale-while-revalidate=300'
+                          }})
+    except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_list_authors'})
+        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+
 
 async def handle_refresh_pr(request, env):
     """Refresh a specific PR's data"""
@@ -548,6 +583,7 @@ async def handle_refresh_pr(request, env):
         }), {'headers': {'Content-Type': 'application/json'}})
         
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_refresh_pr'})
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
@@ -651,6 +687,7 @@ async def handle_batch_refresh_prs(request, env):
         }), {'headers': {'Content-Type': 'application/json'}})
         
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_batch_refresh_prs'})
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
         
@@ -688,6 +725,7 @@ async def handle_rate_limit(env):
         )
     except Exception as e:
         print(f"Error in handle_rate_limit: {str(e)}")
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_rate_limit'})
         return Response.new(
             json.dumps({'error': 'Internal server error fetching rate status'}), 
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
@@ -762,6 +800,7 @@ async def handle_pr_updates_check(env):
             {'headers': {'Content-Type': 'application/json'}}
         )
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_pr_updates_check'})
         return Response.new(
             json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
@@ -792,6 +831,7 @@ async def handle_get_pr(env, pr_id):
             {'headers': {'Content-Type': 'application/json'}}
         )
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_get_pr'})
         return Response.new(
             json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
@@ -957,6 +997,16 @@ async def handle_github_webhook(request, env):
                         {'headers': {'Content-Type': 'application/json'}}
                     )
                 else:
+                    await notify_slack_error(
+                        getattr(env, 'SLACK_ERROR_WEBHOOK', ''),
+                        error_type='WebhookError',
+                        error_message='Failed to fetch PR data from GitHub',
+                        context={
+                            'handler': 'handle_github_webhook',
+                            'pr_number': str(pr_number),
+                            'repo': f'{repo_owner}/{repo_name}',
+                        },
+                    )
                     return Response.new(
                         json.dumps({'error': 'Failed to fetch PR data from GitHub'}),
                         {'status': 500, 'headers': {'Content-Type': 'application/json'}}
@@ -1175,6 +1225,7 @@ async def handle_github_webhook(request, env):
         
     except Exception as e:
         print(f"Error handling webhook: {type(e).__name__}: {str(e)}")
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_github_webhook'})
         return Response.new(
             json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
@@ -1266,6 +1317,7 @@ async def handle_pr_timeline(request, env, path):
         }), 
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_pr_timeline'})
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
@@ -1368,6 +1420,7 @@ async def handle_pr_review_analysis(request, env, path):
         }), 
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_pr_review_analysis'})
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
@@ -1520,6 +1573,12 @@ async def handle_pr_readiness(request, env, path):
         response_data = await _run_readiness_analysis(env, pr, pr_id, github_token)
         
         if response_data is None:
+            await notify_slack_error(
+                getattr(env, 'SLACK_ERROR_WEBHOOK', ''),
+                error_type='ReadinessError',
+                error_message='Failed to compute readiness analysis',
+                context={'handler': 'handle_pr_readiness', 'pr_id': str(pr_id)},
+            )
             return Response.new(json.dumps({'error': 'Failed to compute readiness analysis'}),
                               {'status': 500, 'headers': {'Content-Type': 'application/json'}})
         
@@ -1534,6 +1593,7 @@ async def handle_pr_readiness(request, env, path):
             }
         )
     except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_pr_readiness'})
         return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
