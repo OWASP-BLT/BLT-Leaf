@@ -260,20 +260,59 @@
             opacity: 0.6;
         }
 
-        /* Scrollbars */
-        .dark ::-webkit-scrollbar {
-            background-color: #1e293b;
+        /* Scrollbars — thin red bar, hidden until the container is hovered */
+        aside::-webkit-scrollbar,
+        main::-webkit-scrollbar {
+            width: 4px;
         }
 
-        .dark ::-webkit-scrollbar-thumb {
-            background-color: #475569;
-            border-radius: 4px;
+        aside::-webkit-scrollbar-track,
+        main::-webkit-scrollbar-track {
+            background: transparent;
         }
 
-        .dark ::-webkit-scrollbar-thumb:hover {
-            background-color: #64748b;
+        aside::-webkit-scrollbar-thumb,
+        main::-webkit-scrollbar-thumb {
+            background-color: transparent;
+            border-radius: 2px;
+        }
+
+        aside:hover::-webkit-scrollbar-thumb,
+        main:hover::-webkit-scrollbar-thumb {
+            background-color: #E10000;
+        }
+
+        aside::-webkit-scrollbar-thumb:hover,
+        main::-webkit-scrollbar-thumb:hover {
+            background-color: #BC0000;
+        }
+
+        /* Firefox */
+        aside, main {
+            scrollbar-width: thin;
+            scrollbar-color: transparent transparent;
+        }
+
+        aside:hover, main:hover {
+            scrollbar-color: #E10000 transparent;
         }
         
+        /* Sidebar resize handle */
+        #sidebarResizeHandle {
+            width: 5px;
+            cursor: col-resize;
+            background: transparent;
+            flex-shrink: 0;
+            transition: background-color 0.15s ease;
+            position: relative;
+            z-index: 10;
+        }
+
+        #sidebarResizeHandle:hover,
+        #sidebarResizeHandle.dragging {
+            background-color: #E10000;
+        }
+
         /* Mobile autocomplete dropdown - responsive fallback */
         #repoList {
             display: none;
@@ -310,7 +349,7 @@
     </style>
 </head>
 
-<body class="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
+<body class="flex h-screen overflow-hidden flex-col bg-slate-50 text-slate-900 antialiased dark:bg-slate-900 dark:text-slate-100">
     <header class="sticky top-0 z-30 border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
         <div class="mx-auto px-4 sm:px-6 lg:px-8">
             <!-- Mobile: Compact two-line layout -->
@@ -458,8 +497,8 @@
     </header>
 
     <div class="mx-auto flex min-h-0 w-full flex-1 flex-col md:flex-row">
-        <aside
-            class="w-full border-b border-slate-200 bg-white md:w-72 md:border-b-0 md:border-r dark:border-slate-700 dark:bg-slate-800">
+        <aside id="sidebarPanel"
+            class="w-full border-b border-slate-200 bg-white md:border-b-0 md:border-r dark:border-slate-700 dark:bg-slate-800 md:overflow-y-auto" style="flex-shrink: 0;">
             <div class="p-4">
                 <!-- Org filter autocomplete -->
                 <div class="mb-3 relative" id="orgFilterContainer">
@@ -548,8 +587,12 @@
             </div>
         </aside>
 
-        <main class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-            <section class="mb-6 space-y-3">
+        <!-- Sidebar resize handle (desktop only) -->
+        <div id="sidebarResizeHandle" class="hidden md:block" title="Drag to resize sidebar"></div>
+
+        <div class="flex flex-col flex-1 min-h-0">
+            <main class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+                <section class="mb-6 space-y-3">
                 <div class="flex w-full max-w-4xl flex-col gap-2 sm:flex-row">
                     <input type="text" id="prUrlInput"
                         class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#E10000] focus:outline-none focus:ring-2 focus:ring-[#ffe3e3] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-red-900/50"
@@ -578,7 +621,39 @@
                         tracking</p>
                 </div>
             </div>
+            <!-- Footer -->
+            <footer class="border-t border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800 -mx-4 sm:-mx-6 mt-6">
+                <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+                    <div class="space-y-4">
+                        <p class="text-sm text-slate-700 leading-relaxed dark:text-slate-300">
+                            Leaf is a Readiness and Security PR checker. It reviews pull requests for operational readiness,
+                            security risks, and production-impacting changes before they ship. Inspired by the surge of AI-generated
+                            PRs, Leaf helps teams maintain high standards by adding an automated layer of critical thinking and risk
+                            detection to every change.
+                        </p>
+                        <p class="text-sm font-medium text-slate-600 dark:text-slate-400">
+                            🔒 Security features are coming soon!
+                        </p>
+                        <div class="pt-2 text-xs text-slate-500 dark:text-slate-500">
+                            <p>Part of the <a href="https://owasp.org/www-project-bug-logging-tool/" target="_blank" rel="noopener noreferrer" class="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">OWASP Bug Logging Tool (BLT)</a> project</p>
+                        </div>
+                        <!-- DB Status -->
+                        <div id="dbStatusBar" class="pt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-500">
+                            <span class="font-medium">DB Status:</span>
+                            <span id="dbStatusIndicator" class="inline-flex items-center gap-1">
+                                <span class="inline-block h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600"></span>
+                                <span>checking…</span>
+                            </span>
+                            <span id="dbRowCounts" class="hidden">
+                                &bull; PRs: <span id="dbPrsCount">—</span>
+                                &bull; Timeline cache: <span id="dbTimelineCount">—</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </footer>
         </main>
+        </div>
     </div>
 
     <!-- Raw Data Modal -->
@@ -2140,7 +2215,7 @@
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800" style="overflow-x: auto;">
                     <table class="w-full text-left text-sm" style="min-width: 1920px;">
-                        <thead class="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                        <thead class="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                             <tr>
                                 <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="author_login" style="min-width: 100px;" title="Click to sort by Author. Shift+Click to add to sort columns.&#10;API: GET /repos/{owner}/{repo}/pulls/{pr_number} (user.login field)">
                                     <div class="flex items-center gap-1 min-w-0">
@@ -3570,37 +3645,6 @@
         }
     </script>
 
-    <!-- Footer -->
-    <footer class="border-t border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-            <div class="space-y-4">
-                <p class="text-sm text-slate-700 leading-relaxed dark:text-slate-300">
-                    Leaf is a Readiness and Security PR checker. It reviews pull requests for operational readiness,
-                    security risks, and production-impacting changes before they ship. Inspired by the surge of AI-generated
-                    PRs, Leaf helps teams maintain high standards by adding an automated layer of critical thinking and risk
-                    detection to every change.
-                </p>
-                <p class="text-sm font-medium text-slate-600 dark:text-slate-400">
-                    🔒 Security features are coming soon!
-                </p>
-                <div class="pt-2 text-xs text-slate-500 dark:text-slate-500">
-                    <p>Part of the <a href="https://owasp.org/www-project-bug-logging-tool/" target="_blank" rel="noopener noreferrer" class="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">OWASP Bug Logging Tool (BLT)</a> project</p>
-                </div>
-                <!-- DB Status -->
-                <div id="dbStatusBar" class="pt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-500">
-                    <span class="font-medium">DB Status:</span>
-                    <span id="dbStatusIndicator" class="inline-flex items-center gap-1">
-                        <span class="inline-block h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600"></span>
-                        <span>checking…</span>
-                    </span>
-                    <span id="dbRowCounts" class="hidden">
-                        &bull; PRs: <span id="dbPrsCount">—</span>
-                        &bull; Timeline cache: <span id="dbTimelineCount">—</span>
-                    </span>
-                </div>
-            </div>
-        </div>
-    </footer>
     <script>
         (async function loadDbStatus() {
             try {
@@ -3629,6 +3673,70 @@
                     '<span class="inline-block h-2 w-2 rounded-full bg-yellow-500"></span>' +
                     '<span class="text-yellow-600 dark:text-yellow-400">Unavailable</span>';
             }
+        })();
+    </script>
+
+    <!-- Sidebar resize logic -->
+    <script>
+        (function () {
+            const SIDEBAR_MIN = 160;
+            const SIDEBAR_MAX = 640;
+            const STORAGE_KEY = 'sidebarWidth';
+            const DEFAULT_WIDTH = 288;
+            const DESKTOP_BREAKPOINT = 768;
+
+            const sidebar = document.getElementById('sidebarPanel');
+            const handle = document.getElementById('sidebarResizeHandle');
+            if (!sidebar || !handle) return;
+
+            // Restore saved width on desktop
+            function applyWidth(w) {
+                sidebar.style.width = w + 'px';
+                localStorage.setItem(STORAGE_KEY, w);
+            }
+
+            function initWidth() {
+                if (window.innerWidth >= DESKTOP_BREAKPOINT) {
+                    const saved = parseInt(localStorage.getItem(STORAGE_KEY), 10);
+                    applyWidth(saved && saved >= SIDEBAR_MIN && saved <= SIDEBAR_MAX ? saved : DEFAULT_WIDTH);
+                } else {
+                    sidebar.style.width = '';
+                }
+            }
+
+            initWidth();
+            window.addEventListener('resize', initWidth);
+
+            // Drag logic
+            let dragging = false;
+            let startX = 0;
+            let startWidth = 0;
+
+            handle.addEventListener('mousedown', function (e) {
+                if (window.innerWidth < DESKTOP_BREAKPOINT) return;
+                dragging = true;
+                startX = e.clientX;
+                startWidth = sidebar.offsetWidth;
+                handle.classList.add('dragging');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', function (e) {
+                if (!dragging) return;
+                const delta = e.clientX - startX;
+                const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startWidth + delta));
+                applyWidth(newWidth);
+            });
+
+            document.addEventListener('mouseup', function () {
+                if (!dragging) return;
+                dragging = false;
+                handle.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            });
         })();
     </script>
 </body>
