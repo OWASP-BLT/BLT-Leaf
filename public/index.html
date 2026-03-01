@@ -559,6 +559,7 @@
                         Add PR
                     </button>
                 </div>
+                <span id="url-error" style="color: #ff4d4d; font-size: 0.85em; display: none; margin-top: 5px;"></span>
 
                 <div class="mt-2 flex items-center gap-2">
                     <input type="checkbox" id="addAllPrsCheckbox"
@@ -615,6 +616,59 @@
         let repos = [];
         let allAuthors = []; // All unique authors from the database (including bots)
         let repoSortByPrs = localStorage.getItem('repoSortByPrs') !== 'false';
+        /**
+ * Validates that a string is a well-formed GitHub PR URL.
+ * Accepts:
+ *   https://github.com/owner/repo/pull/123
+ *   https://github.com/owner/repo/pull/123/files  (common variant)
+ * Returns { valid: true, owner, repo, number } or { valid: false, reason }
+ */
+function parseGitHubPRUrl(raw) {
+  let url;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return { valid: false, reason: 'That doesn\'t look like a URL. Please paste the full PR link.' };
+  }
+
+  if (url.hostname !== 'github.com') {
+    return { valid: false, reason: 'Only github.com PRs are supported.' };
+  }
+
+  // Path must be:  /owner/repo/pull/NUMBER  (optionally /files etc.)
+  const PR_PATH_RE = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(\/.*)?$/;
+  const match = url.pathname.match(PR_PATH_RE);
+
+  if (!match) {
+    return {
+      valid: false,
+      reason: 'URL must point to a Pull Request, e.g. https://github.com/owner/repo/pull/42',
+    };
+  }
+
+  const prNumber = parseInt(match[3], 10);
+  if (prNumber < 1 || prNumber > 999999) {
+    return { valid: false, reason: 'PR number looks invalid.' };
+  }
+
+  return { valid: true, owner: match[1], repo: match[2], number: prNumber };
+}
+
+// Attach to button
+document.getElementById('addPrBtn').addEventListener('click', () => {
+  const raw = document.getElementById('prUrlInput').value;
+  const errEl = document.getElementById('url-error');
+  errEl.textContent = '';
+
+  const result = parseGitHubPRUrl(raw);
+  if (!result.valid) {
+    errEl.textContent = result.reason;   // inline error, no alert()
+    document.getElementById('prUrlInput').focus();
+    return;
+  }
+
+  checkPR(raw);  // passes only after validation
+});
         // Support unlimited sort columns
         // Each entry in sortColumns array has: {column: 'column_name', direction: 'asc'|'desc'}
         let sortColumns = [];

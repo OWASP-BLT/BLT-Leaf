@@ -206,9 +206,13 @@ async def handle_add_pr(request, env):
             # Catch ValueError from parse_pr_url
             try:
                 parsed = parse_pr_url(pr_url)
+                # Extract the validated data from the dictionary
+                owner = parsed['owner']
+                repo = parsed['repo']
+                pr_num = parsed['pr_number']
             except ValueError as e:
                 return Response.new(
-                    json.dumps({'error': str(e)}),
+                    json.dumps({'ok': False, 'error': str(e)}),
                     {'status': 400, 'headers': {'Content-Type': 'application/json'}}
                 )
             

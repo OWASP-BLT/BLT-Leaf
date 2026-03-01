@@ -1,6 +1,7 @@
 """Utility functions for PR parsing and analysis"""
 
 import re
+import json
 from datetime import datetime, timezone
 
 # Score multiplier when changes are requested
@@ -12,36 +13,45 @@ _CHANGES_REQUESTED_SCORE_MULTIPLIER = 0.5
 _MERGE_CONFLICTS_SCORE_MULTIPLIER = 0.67
 
 
-def parse_pr_url(pr_url):
+# 1. Place this regex at the top of the file (outside the function)
+_GITHUB_PR_RE = re.compile(
+    r'^https://github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)/pull/(\d+)(/.*)?$'
+)
+
+# 2. Replace the old parse_pr_url with this one
+def parse_pr_url(pr_url: str):
     """
-    Parse GitHub PR URL to extract owner, repo, and PR number.
-    
-    Security Hardening (Issue #45):
-    - Type validation to prevent type confusion attacks
-    - Anchored regex pattern to block malformed URLs with trailing junk
-    - Raises ValueError instead of returning None for better error handling
+    Validates and parses a GitHub PR URL.
+    Returns a dict with owner, repo, and pr_number or raises ValueError.
     """
-    # FIX Issue #45: Type validation
-    if not isinstance(pr_url, str):
-        raise ValueError("PR URL must be a string")
-    
-    if not pr_url:
-        raise ValueError("PR URL is required")
-    
-    pr_url = pr_url.strip().rstrip('/')
-    
-    # FIX Issue #45: Anchored regex - must match EXACTLY, no trailing junk allowed
-    pattern = r'^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$'
-    match = re.match(pattern, pr_url)
-    
+    # Type and presence validation
+    if not pr_url or not isinstance(pr_url, str):
+        raise ValueError("PR URL is required and must be a string.")
+
+    raw_url = pr_url.strip()
+
+    # Security: Prevent ReDoS or overflow attacks with length limit
+    if len(raw_url) > 300:
+        raise ValueError("URL is too long.")
+
+    match = _GITHUB_PR_RE.match(raw_url)
     if not match:
-        # FIX Issue #45: Raise error instead of returning None
-        raise ValueError("Invalid GitHub PR URL. Format: https://github.com/OWNER/REPO/pull/NUMBER")
-    
+        raise ValueError(
+            "Invalid GitHub PR URL. Expected format: "
+            "https://github.com/owner/repo/pull/123"
+        )
+
+    owner, repo, pr_num_str = match.group(1), match.group(2), match.group(3)
+    pr_number = int(pr_num_str)
+
+    if pr_number < 1:
+        raise ValueError("PR number must be a positive integer.")
+
+    # Return as a dictionary to match the original function's signature
     return {
-        'owner': match.group(1),
-        'repo': match.group(2),
-        'pr_number': int(match.group(3))
+        'owner': owner,
+        'repo': repo,
+        'pr_number': pr_number
     }
 
 
