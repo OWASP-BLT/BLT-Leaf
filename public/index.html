@@ -607,6 +607,33 @@
         </div>
     </div>
 
+    <!-- Comment Modal -->
+    <div id="commentModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div class="relative w-full max-w-2xl max-h-[90vh] m-4 bg-white dark:bg-slate-800 rounded-lg shadow-2xl flex flex-col">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                <h2 class="text-xl font-semibold text-slate-900 dark:text-slate-100"><i class="fas fa-clipboard-list mr-2 text-amber-500"></i>Request Changes</h2>
+                <button id="closeCommentModal" class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 transition-colors">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <!-- Modal Body -->
+            <div class="flex-1 overflow-auto px-6 py-4">
+                <p class="text-sm text-slate-600 dark:text-slate-400 mb-3">Click <strong>Copy &amp; Open Review</strong> to copy this text and open the PR's Files Changed tab — paste it in the review comment field and submit as <strong>"Request changes"</strong>.</p>
+                <textarea id="commentContent" class="w-full text-xs text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400" rows="16" readonly></textarea>
+            </div>
+            <!-- Modal Footer -->
+            <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700">
+                <button id="copyAndOpenReviewBtn" class="rounded-md bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-colors shadow-sm inline-flex items-center gap-1">
+                    <i class="fab fa-github"></i> Copy &amp; Open Review
+                </button>
+                <button id="closeCommentModalBtn" class="rounded-md bg-slate-500 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-400 transition-colors shadow-sm">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentRepo = localStorage.getItem('currentRepo') || 'all';
         let currentOrg = localStorage.getItem('currentOrg') || '';
@@ -657,6 +684,8 @@
         let autoRefreshEnabled = localStorage.getItem('autoRefreshEnabled') !== 'false'; // enabled by default
         let autoRefreshInterval = null;
         let prUpdateTimestamps = {}; // Track PR update timestamps for change detection
+        let prAnalysisCache = {}; // Cache readiness/reviewHealth data per PR for comment generation
+        let currentCommentReviewUrl = '#'; // Review page URL set when comment modal opens
         const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
         const FEEDBACK_DISMISS_DELAY = 5000; // 5 seconds
 
@@ -2042,6 +2071,121 @@
         }
 
         /**
+         * Build a comment template from analysis data
+         */
+        function buildContributorComment(pr, readiness, reviewHealth) {
+            const author = pr.author_login || 'there';
+            const lines = [];
+            lines.push(`## 🔍 PR Analysis for @${author}`);
+            lines.push('');
+            lines.push('The automated PR analyzer has reviewed this pull request. Here is a summary of the required changes and recommendations:');
+            lines.push('');
+
+            const blockers = readiness.blockers || [];
+            const warnings = readiness.warnings || [];
+            const recommendations = readiness.recommendations || [];
+
+            if (blockers.length > 0) {
+                lines.push('### 🚫 Blockers (must be resolved before merge)');
+                blockers.forEach(b => lines.push(`- ${b}`));
+                lines.push('');
+            }
+
+            if (warnings.length > 0) {
+                lines.push('### ⚠️ Warnings (should be addressed)');
+                warnings.forEach(w => lines.push(`- ${w}`));
+                lines.push('');
+            }
+
+            if (recommendations.length > 0) {
+                lines.push('### 💡 Recommendations (optional improvements)');
+                recommendations.forEach(r => lines.push(`- ${r}`));
+                lines.push('');
+            }
+
+            if (blockers.length === 0 && warnings.length === 0 && recommendations.length === 0) {
+                lines.push('### ✅ No Issues Found');
+                lines.push('This PR looks good and is ready to merge!');
+                lines.push('');
+            }
+
+            const fmtScore = (display, raw) => (display != null ? display : (raw != null ? `${raw}%` : 'N/A'));
+
+            lines.push('### 📊 Analysis Scores');
+            lines.push(`- **Overall Readiness:** ${fmtScore(readiness.overall_score_display, readiness.overall_score)}`);
+            lines.push(`- **CI Score:** ${fmtScore(readiness.ci_score_display, readiness.ci_score)}`);
+            lines.push(`- **Review Score:** ${fmtScore(readiness.review_score_display, readiness.review_score)}`);
+            if (reviewHealth && reviewHealth.response_rate_display) {
+                lines.push(`- **Response Rate:** ${reviewHealth.response_rate_display}`);
+            }
+            lines.push('');
+            lines.push('---');
+            lines.push('*Generated by [BLT-Leaf PR Analyzer](https://owasp-blt.github.io/BLT-Leaf/)*');
+
+            return lines.join('\n');
+        }
+
+        /**
+         * Open comment modal for a given PR
+         */
+        function openCommentModal(prId) {
+            const cached = prAnalysisCache[prId];
+            if (!cached) {
+                showError('No analysis data available. Please run analysis first.');
+                return;
+            }
+
+            const pr = allPrs.find(p => p.id === prId);
+            if (!pr) {
+                showError('PR not found.');
+                return;
+            }
+
+            const comment = buildContributorComment(pr, cached.readiness, cached.reviewHealth);
+            document.getElementById('commentContent').value = comment;
+            // Store the Files Changed tab URL so the combined button can open it
+            currentCommentReviewUrl = (pr.pr_url || '') + '/files';
+
+            const modal = document.getElementById('commentModal');
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        /**
+         * Hide comment modal
+         */
+        function hideCommentModal() {
+            document.getElementById('commentModal').classList.add('hidden');
+            document.body.style.overflow = '';
+        }
+
+        /**
+         * Copy review text to clipboard and open the PR's Files Changed tab
+         * so the reviewer can paste the text and submit a "Request changes" review.
+         */
+        async function copyAndOpenReview() {
+            const textarea = document.getElementById('commentContent');
+            try {
+                await navigator.clipboard.writeText(textarea.value);
+                const btn = document.getElementById('copyAndOpenReviewBtn');
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-check mr-1"></i>Copied! Opening…';
+                btn.classList.add('bg-green-600', 'hover:bg-green-700');
+                btn.classList.remove('bg-amber-600', 'hover:bg-amber-700');
+                // Open the Files Changed tab where the review form is
+                window.open(currentCommentReviewUrl, '_blank', 'noopener,noreferrer');
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                    btn.classList.add('bg-amber-600', 'hover:bg-amber-700');
+                }, 2500);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                showError('Failed to copy to clipboard');
+            }
+        }
+
+        /**
          * Pause auto-refresh when tab is not visible (optimization)
          */
         document.addEventListener('visibilitychange', () => {
@@ -2347,6 +2491,13 @@
                     showRawDataModal(prId);
                 });
             });
+
+            document.querySelectorAll('.comment-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const prId = parseInt(e.currentTarget.dataset.prId, 10);
+                    openCommentModal(prId);
+                });
+            });
             
             if (document.getElementById('prSearchInput').value.trim() === '') {
                 renderPagination();
@@ -2578,6 +2729,9 @@
                         <button class="view-raw-btn rounded-md border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600" data-pr-id="${pr.id}" title="View raw PR data">
                             <i class="fas fa-database"></i>
                         </button>
+                        <button class="comment-btn hidden rounded-md border border-amber-400 bg-white px-2 py-2 text-xs font-semibold text-amber-600 hover:bg-amber-50 dark:border-amber-600 dark:bg-slate-700 dark:text-amber-400 dark:hover:bg-amber-950/30" data-pr-id="${pr.id}" title="Request changes on this PR">
+                            <i class="fas fa-clipboard-list"></i>
+                        </button>
                     </div>
                 </td>
             `;
@@ -2700,6 +2854,14 @@
             if (viewRawBtn) {
                 viewRawBtn.addEventListener('click', (e) => {
                     showRawDataModal(prId);
+                });
+            }
+
+            // Re-attach the click event listener to the comment button
+            const commentBtn = newRow.querySelector('.comment-btn');
+            if (commentBtn) {
+                commentBtn.addEventListener('click', (e) => {
+                    openCommentModal(prId);
                 });
             }
         }
@@ -3000,6 +3162,13 @@
 
                 issuesHTML += '</div>';
                 issuesCell.innerHTML = issuesHTML;
+            }
+
+            // Cache analysis data and show comment button
+            prAnalysisCache[prId] = { readiness, reviewHealth };
+            const commentBtn = document.querySelector(`#pr-row-${prId} .comment-btn`);
+            if (commentBtn) {
+                commentBtn.classList.remove('hidden');
             }
         }
 
@@ -3303,6 +3472,22 @@
                 if (!modal.classList.contains('hidden')) {
                     hideRawDataModal();
                 }
+                const commentModal = document.getElementById('commentModal');
+                if (!commentModal.classList.contains('hidden')) {
+                    hideCommentModal();
+                }
+            }
+        });
+
+        // Comment modal event listeners
+        document.getElementById('closeCommentModal').addEventListener('click', hideCommentModal);
+        document.getElementById('closeCommentModalBtn').addEventListener('click', hideCommentModal);
+        document.getElementById('copyAndOpenReviewBtn').addEventListener('click', copyAndOpenReview);
+
+        // Close comment modal when clicking outside
+        document.getElementById('commentModal').addEventListener('click', (e) => {
+            if (e.target.id === 'commentModal') {
+                hideCommentModal();
             }
         });
 
