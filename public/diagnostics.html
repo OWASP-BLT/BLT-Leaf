@@ -55,10 +55,10 @@
                     class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100">
                     <i class="fab fa-github"></i> GitHub
                 </a>
-                <button id="themeToggle"
+                <button data-theme-toggle
                     class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 transition-colors"
                     title="Toggle dark/light mode">
-                    <i class="fas fa-moon" id="themeIcon"></i>
+                    <i class="fas fa-moon" data-theme-icon></i>
                 </button>
             </nav>
         </div>
@@ -168,8 +168,8 @@
         buildList();
 
         // Theme toggle
-        const themeToggle = document.getElementById('themeToggle');
-        const themeIcon = document.getElementById('themeIcon');
+        const themeToggle = document.querySelector('[data-theme-toggle]');
+        const themeIcon = document.querySelector('[data-theme-icon]');
         themeToggle.addEventListener('click', () => {
             const isDark = document.documentElement.classList.toggle('dark');
             themeIcon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';

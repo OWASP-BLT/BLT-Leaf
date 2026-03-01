@@ -1,6 +1,6 @@
 """Main entry point for BLT-Leaf PR Readiness Checker - Cloudflare Worker"""
 
-from js import Response, URL
+from js import Headers, Response, URL
 from slack_notifier import notify_slack_exception, notify_slack_error
 import json
 # Import all handlers
@@ -21,6 +21,41 @@ from handlers import (
     handle_pr_readiness,
     handle_scheduled_refresh
 )
+
+
+def is_local_dev_request(request):
+    """Detect local wrangler dev traffic."""
+    request_url = str(request.url)
+    return '127.0.0.1' in request_url or 'localhost' in request_url
+
+
+def is_cache_controlled_static_path(path):
+    """Static asset paths that should get explicit cache control headers."""
+    if path == '/' or path == '/sw.js':
+        return True
+    return path.endswith('.js') or path.endswith('.css') or path.endswith('.html')
+
+
+async def fetch_static_asset_with_cache_headers(request, env, path):
+    """Fetch static asset response and enforce cache headers when needed."""
+    asset_response = await env.ASSETS.fetch(request)
+    if not is_cache_controlled_static_path(path):
+        return asset_response
+
+    headers = Headers.new(asset_response.headers)
+    if is_local_dev_request(request):
+        headers.set('Cache-Control', 'no-store')
+    else:
+        headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+
+    return Response.new(
+        asset_response.body,
+        {
+            'status': asset_response.status,
+            'statusText': asset_response.statusText,
+            'headers': headers,
+        },
+    )
 
 
 async def on_fetch(request, env):
@@ -54,7 +89,7 @@ async def on_fetch(request, env):
         if path == '/' or path == '/index.html':
             # Use env.ASSETS to serve static files if available
             if hasattr(env, 'ASSETS'): 
-                return await env.ASSETS.fetch(request)
+                return await fetch_static_asset_with_cache_headers(request, env, path)
             # Fallback: return simple message
             return Response.new('Please configure assets in wrangler.toml', 
                               {'status': 200, 'headers': {**cors_headers, 'Content-Type': 'text/html'}})
@@ -210,7 +245,8 @@ async def on_fetch(request, env):
         
         # If no API route matched, try static assets or return 404
         if response is None:
-            if hasattr(env, 'ASSETS'): return await env.ASSETS.fetch(request)
+            if hasattr(env, 'ASSETS'):
+                return await fetch_static_asset_with_cache_headers(request, env, path)
             return Response.new('Not Found', {'status': 404, 'headers': cors_headers})
         
         # Apply CORS to API responses
