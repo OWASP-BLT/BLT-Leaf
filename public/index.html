@@ -1120,6 +1120,21 @@
             }, FEEDBACK_DISMISS_DELAY);
         }
 
+        function showSuccessToast(message) {
+            // Show a temporary global success message (toast)
+            const toast = document.createElement('div');
+            toast.className = 'fixed top-4 right-4 z-[100] flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900 shadow-lg dark:border-green-900 dark:bg-green-950/30 dark:text-green-400 max-w-md animate-slide-in';
+            toast.innerHTML = `
+                <span class="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-green-100 text-xs font-bold text-green-700 dark:bg-green-900 dark:text-green-400">✓</span>
+                <div class="leading-5">${escapeHtml(message)}</div>
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'transition-opacity', 'duration-500');
+                setTimeout(() => toast.remove(), 500);
+            }, FEEDBACK_DISMISS_DELAY);
+        }
+
         function showSectionMessage(message, type) {
             // Show an inline feedback message in the Add PR section on the page
             const section = document.getElementById('prUrlInput')?.closest('section');
@@ -2505,7 +2520,12 @@
                 </td>
                 <td class="px-2 py-3">${reviewBadge}</td>
                 <td class="px-2 py-3">${renderReviewerAvatars(pr.reviewers_json)}</td>
-                <td class="px-2 py-3 text-slate-700 dark:text-slate-300 text-xs truncate">${escapeHtml(mergeableText)}</td>
+                <td class="px-2 py-3 text-slate-700 dark:text-slate-300 text-xs">
+                    <span class="inline-flex items-center gap-1">
+                        ${escapeHtml(mergeableText)}
+                        ${mergeableText === 'Conflicts' ? `<button class="conflict-message-btn inline-flex items-center justify-center rounded text-orange-500 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300 focus:outline-none focus:ring-1 focus:ring-orange-400" data-pr-url="${escapeHtml(pr.pr_url)}" data-author-login="${escapeHtml(pr.author_login)}" title="Open PR and copy a conflict resolution message to clipboard" aria-label="Copy conflict message and open PR"><i class="fas fa-comment-dots"></i></button>` : ''}
+                    </span>
+                </td>
                 <td class="px-2 py-3 text-center text-slate-700 dark:text-slate-300 text-xs">${pr.files_changed}</td>
                 <td class="px-2 py-3 text-center text-slate-700 dark:text-slate-300 text-xs">${pr.commits_count || 0}</td>
                 <td class="px-2 py-3 text-center text-slate-700 dark:text-slate-300 text-xs">
@@ -2581,6 +2601,26 @@
                     </div>
                 </td>
             `;
+
+            // Add click handler for the conflict message button
+            const conflictMessageBtn = row.querySelector('.conflict-message-btn');
+            if (conflictMessageBtn) {
+                conflictMessageBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const prUrl = conflictMessageBtn.dataset.prUrl;
+                    const authorLogin = conflictMessageBtn.dataset.authorLogin;
+                    const authorMention = authorLogin && /^[a-zA-Z0-9_.-]+$/.test(authorLogin) ? `@${authorLogin}` : 'contributor';
+                    const message = `Hi ${authorMention}, this PR has merge conflicts that need to be resolved before it can be merged. Could you please fix the conflicts? Thank you!`;
+                    const prUrlWithComment = `${prUrl}?expand=1&body=${encodeURIComponent(message)}`;
+                    try {
+                        await navigator.clipboard.writeText(message);
+                        showSuccessToast('Opening PR with conflict message pre-filled...');
+                    } catch (err) {
+                        console.error('Failed to copy conflict message:', err);
+                    }
+                    window.open(prUrlWithComment, '_blank', 'noopener,noreferrer');
+                });
+            }
 
             // Add click handler to highlight the row when clicked
             row.addEventListener('click', (e) => {
