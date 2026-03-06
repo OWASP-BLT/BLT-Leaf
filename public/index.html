@@ -2232,6 +2232,11 @@
                                         <span class="truncate">Issues</span> ${getSortIcon('issues_count')}
                                     </div>
                                 </th>
+                                <th class='cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="risk_summary" style="min-width: 200px;" title="AI-generated risk summmary for the PR">
+                                    <div class="flex items-center gap-1 min-w-0">
+                                        <span class="truncate">Risk Summary</span>
+                                    </div>
+                                </th>
                                 <th class="cursor-pointer px-2 py-3 hover:bg-slate-100 dark:hover:bg-slate-900" data-sort-column="last_updated_at" style="min-width: 90px;" title="Click to sort by PR last updated time. Shift+Click to add to sort columns.&#10;API: GET /repos/{owner}/{repo}/pulls/{pr_number} (updated_at field)">
                                     <div class="flex items-center gap-1 min-w-0">
                                         <i class="fas fa-clock text-slate-400 dark:text-slate-500 flex-shrink-0"></i>
@@ -2556,6 +2561,9 @@
                     <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
                 </td>
                 <td class="px-2 py-3" id="readiness-issues-${pr.id}">
+                    <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
+                </td>
+                <td class="px-2 py-3 text-center" id="readiness-risk-summary-${pr.id}">
                     <span class="text-xs text-slate-400 dark:text-slate-500">-</span>
                 </td>
                 <td class="px-2 py-3 text-xs text-slate-600 dark:text-slate-400 truncate">
