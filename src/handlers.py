@@ -790,8 +790,8 @@ async def handle_dashboard(env):
                 COALESCE(SUM(CASE WHEN is_draft = 1 THEN 1 ELSE 0 END), 0) AS draft_prs,
                 COALESCE(SUM(CASE WHEN checks_failed > 0 THEN 1 ELSE 0 END), 0) AS has_ci_failures,
                 COALESCE(SUM(CASE WHEN checks_failed = 0 AND checks_passed > 0 THEN 1 ELSE 0 END), 0) AS all_ci_passing,
-                COALESCE(SUM(CASE WHEN checks_passed = 0 AND checks_failed = 0 AND checks_skipped = 0 THEN 1 ELSE 0 END), 0) AS no_checks,
-                COALESCE(SUM(CASE WHEN last_updated_at < datetime('now', '-30 days') THEN 1 ELSE 0 END), 0) AS stale_prs
+                COALESCE(SUM(CASE WHEN checks_passed = 0 AND checks_failed = 0 THEN 1 ELSE 0 END), 0) AS no_checks,
+                COALESCE(SUM(CASE WHEN datetime(last_updated_at) < datetime('now', '-30 days') THEN 1 ELSE 0 END), 0) AS stale_prs
             FROM prs
             WHERE is_merged = 0 AND state = 'open'
         ''').first()
@@ -907,7 +907,7 @@ async def handle_dashboard(env):
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_dashboard'})
         return Response.new(
-            json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+            json.dumps({'error': 'Internal server error'}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
         )
     
