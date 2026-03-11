@@ -15,6 +15,7 @@ from utils import (
 from cache import (
     check_rate_limit, get_readiness_cache, set_readiness_cache,
     invalidate_readiness_cache, invalidate_timeline_cache, get_rate_limit_cache,
+    get_cached_flakiness_scores,
     _READINESS_CACHE_TTL, _RATE_LIMIT_CACHE_TTL, _READINESS_RATE_LIMIT,
     _READINESS_RATE_WINDOW, _rate_limit_cache
 )
@@ -1584,8 +1585,14 @@ async def _run_readiness_analysis(env, pr, pr_id, github_token):
         # Classify review health
         review_classification, review_score = classify_review_health(review_data)
         
+        # Load flakiness scores from D1 (60-min in-memory cache, graceful fallback)
+        flakiness_scores = await get_cached_flakiness_scores(env)
+
         # Calculate combined readiness
-        readiness = calculate_pr_readiness(pr, review_classification, review_score)
+        readiness = calculate_pr_readiness(
+            pr, review_classification, review_score,
+            flakiness_scores=flakiness_scores,
+        )
         
         # Build response data with percentage formatting
         response_data = {

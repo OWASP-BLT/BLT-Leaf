@@ -2,8 +2,8 @@
 """
 Analyze CI run history to detect flaky tests and compute flakiness scores.
 
-Reads from ci_run_history, upserts results into flakiness_scores, and
-outputs a JSON report to stdout:
+Reads from ci_run_history in Cloudflare D1, upserts results into
+flakiness_scores, and outputs a JSON report to stdout:
   {
     "flaky":         [{"check_name": ..., "flakiness_score": ..., "severity": ..., ...}],
     "deterministic": [...],
@@ -11,7 +11,7 @@ outputs a JSON report to stdout:
   }
 
 Usage:
-  python analyze_flakiness.py --repo owner/repo [--check-name "job name"] [--db-path ...]
+  python analyze_flakiness.py --repo owner/repo [--check-name "job name"]
 """
 
 import argparse
@@ -20,7 +20,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from db_utils import get_db_connection, load_config
+from db_utils import get_d1_credentials, d1_query, d1_select, load_config
 
 
 def _get_severity(score, config):
@@ -117,24 +117,23 @@ def main():
     parser.add_argument('--repo', required=True, help='owner/repo')
     parser.add_argument('--check-name', default=None,
                         help='Limit analysis to a single check name')
-    parser.add_argument('--db-path', default=None)
     args = parser.parse_args()
 
-    conn   = get_db_connection(args.db_path)
+    account_id, db_id, token = get_d1_credentials()
     config = load_config()
 
     # Distinct (check_name, job_name, workflow_name) combos for this repo
-    base_query = """
+    base_sql = """
         SELECT DISTINCT check_name, job_name, workflow_name
         FROM ci_run_history
         WHERE repo = ?
     """
     params = [args.repo]
     if args.check_name:
-        base_query += ' AND check_name = ?'
+        base_sql += ' AND check_name = ?'
         params.append(args.check_name)
 
-    combos = conn.execute(base_query, params).fetchall()
+    combos = d1_select(account_id, db_id, token, base_sql, params)
 
     report = {'flaky': [], 'deterministic': [], 'stable': []}
 
@@ -144,22 +143,24 @@ def main():
         workflow_name = combo['workflow_name']
 
         # Fetch full ordered history for this combo
-        history = conn.execute(
+        history = d1_select(
+            account_id, db_id, token,
             """
             SELECT status, conclusion_category
             FROM ci_run_history
             WHERE repo = ? AND check_name = ? AND job_name = ?
             ORDER BY timestamp ASC
             """,
-            (args.repo, check_name, job_name),
-        ).fetchall()
+            [args.repo, check_name, job_name],
+        )
 
         result = analyze_check(history, config)
         if result is None:
             continue  # not enough data yet
 
         # Upsert into flakiness_scores
-        conn.execute(
+        d1_query(
+            account_id, db_id, token,
             """
             INSERT INTO flakiness_scores
                 (check_name, job_name, workflow_name, flakiness_score, severity,
@@ -177,13 +178,13 @@ def main():
                 consecutive_failures = excluded.consecutive_failures,
                 last_updated         = excluded.last_updated
             """,
-            (
+            [
                 check_name, job_name, workflow_name,
                 result['flakiness_score'], result['severity'],
                 result['classification'], result['total_runs'],
                 result['failure_count'], result['flaky_failures'],
                 result['consecutive_failures'],
-            ),
+            ],
         )
 
         entry = {
@@ -193,9 +194,6 @@ def main():
             **result,
         }
         report[result['classification']].append(entry)
-
-    conn.commit()
-    conn.close()
 
     print(json.dumps(report, indent=2))
     return 0

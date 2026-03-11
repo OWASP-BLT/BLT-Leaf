@@ -40,6 +40,17 @@ _timeline_cache = {
 # Cache TTL in seconds (30 minutes - timeline data changes less frequently)
 _TIMELINE_CACHE_TTL = 1800
 
+# In-memory cache for flakiness scores
+# Populated by get_cached_flakiness_scores(); scores change only when the
+# flakiness_detector workflow runs (typically once per CI run), so a long TTL
+# is appropriate to avoid repeated D1 lookups inside a Worker isolate.
+_flakiness_cache = {
+    # Structure: {'data': dict[(check_name, job_name) -> row], 'timestamp': float}
+    # or empty when not yet loaded
+}
+# Cache TTL in seconds (60 minutes)
+_FLAKINESS_CACHE_TTL = 3600
+
 
 def check_rate_limit(ip_address):
     """Check if request from IP is within rate limit for readiness endpoints.
@@ -303,6 +314,39 @@ async def invalidate_timeline_cache(env, owner, repo, pr_number):
     
     # Also remove from database
     await delete_timeline_from_db(env, owner, repo, pr_number)
+
+
+async def get_cached_flakiness_scores(env):
+    """Return the flakiness scores dict for this Worker isolate.
+
+    Checks the in-memory cache first (60-min TTL); falls back to a D1 query
+    if the cache is cold or stale.  Returns an empty dict when the
+    flakiness_scores table doesn't exist yet (before the first workflow run).
+    """
+    global _flakiness_cache
+
+    from database import get_db, get_all_flakiness_scores
+
+    current_time = time.time()
+    if (_flakiness_cache.get('data') is not None and
+            (current_time - _flakiness_cache.get('timestamp', 0)) < _FLAKINESS_CACHE_TTL):
+        age = int(current_time - _flakiness_cache['timestamp'])
+        print(f"Flakiness Cache: HIT (memory, age: {age}s)")
+        return _flakiness_cache['data']
+
+    print("Flakiness Cache: MISS — loading from D1")
+    try:
+        db = get_db(env)
+        scores = await get_all_flakiness_scores(db)
+    except Exception as e:
+        print(f"Flakiness Cache: D1 load failed ({str(e)}), returning empty dict")
+        scores = {}
+
+    _flakiness_cache['data']      = scores
+    _flakiness_cache['timestamp'] = current_time
+    print(f"Flakiness Cache: Loaded {len(scores)} score(s) into memory")
+    return scores
+
 
 def set_rate_limit_data(limit, remaining, reset):
     """

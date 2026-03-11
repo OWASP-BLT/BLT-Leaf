@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Collect CI job results from a GitHub Actions workflow run and write them to
-the local flakiness history SQLite database.
+Cloudflare D1 via the REST API.
 
 Outputs JSON to stdout:
   {
@@ -18,7 +18,6 @@ Usage:
       --github-token ghp_... \\
       [--commit-sha abc123] \\
       [--pr-number 42] \\
-      [--db-path /path/to/flakiness_history.db] \\
       [--dry-run]
 """
 
@@ -30,7 +29,7 @@ import sys
 import requests
 
 sys.path.insert(0, os.path.dirname(__file__))
-from db_utils import get_db_connection, get_infra_patterns, load_config
+from db_utils import get_d1_credentials, get_infra_patterns, load_config, d1_query
 
 GITHUB_API = 'https://api.github.com'
 
@@ -107,15 +106,14 @@ def main():
     parser.add_argument('--github-token', default=os.environ.get('GITHUB_TOKEN'))
     parser.add_argument('--commit-sha', default='')
     parser.add_argument('--pr-number', type=int, default=None)
-    parser.add_argument('--db-path', default=None)
     parser.add_argument('--dry-run', action='store_true',
                         help='Parse and print results without writing to DB')
     args = parser.parse_args()
 
     owner, repo_name = args.repo.split('/', 1)
 
-    conn = get_db_connection(args.db_path)
-    infra_patterns = get_infra_patterns(conn)
+    account_id, db_id, token = get_d1_credentials()
+    infra_patterns = get_infra_patterns(account_id, db_id, token)
     config = load_config()
 
     run_meta = fetch_run_meta(owner, repo_name, args.workflow_run_id, args.github_token)
@@ -155,28 +153,31 @@ def main():
             failed_jobs.append(job['name'])
 
     if not args.dry_run:
-        conn.executemany(
-            """
+        insert_sql = """
             INSERT INTO ci_run_history
                 (check_name, job_name, workflow_name, workflow_run_id, run_attempt,
                  status, conclusion_category, commit_sha, pr_number, repo)
-            VALUES
-                (:check_name, :job_name, :workflow_name, :workflow_run_id, :run_attempt,
-                 :status, :conclusion_category, :commit_sha, :pr_number, :repo)
-            """,
-            rows,
-        )
-        conn.commit()
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        for row in rows:
+            d1_query(
+                account_id, db_id, token,
+                insert_sql,
+                [
+                    row['check_name'], row['job_name'], row['workflow_name'],
+                    row['workflow_run_id'], row['run_attempt'], row['status'],
+                    row['conclusion_category'], row['commit_sha'],
+                    row['pr_number'], row['repo'],
+                ],
+            )
 
         # Prune history older than configured retention window
         prune_days = config.get('github', {}).get('history_prune_days', 90)
-        conn.execute(
+        d1_query(
+            account_id, db_id, token,
             "DELETE FROM ci_run_history WHERE timestamp < datetime('now', ?)",
-            (f'-{prune_days} days',),
+            [f'-{prune_days} days'],
         )
-        conn.commit()
-
-    conn.close()
 
     output = {
         'failed_jobs': failed_jobs,

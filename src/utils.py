@@ -401,52 +401,68 @@ def classify_review_health(review_data):
     return (classification, score)
 
 
-def calculate_ci_confidence(checks_passed, checks_failed, checks_skipped):
+def calculate_ci_confidence(checks_passed, checks_failed, checks_skipped,
+                            known_flaky_count=0):
     """
-    Calculate CI confidence score from check results
-    
+    Calculate CI confidence score from check results.
+
     Args:
         checks_passed: Number of passing checks
         checks_failed: Number of failing checks
         checks_skipped: Number of skipped checks
-    
+        known_flaky_count: Number of checks whose flakiness classification is
+            'flaky' with severity 'low' or 'medium' (from flakiness_scores D1
+            table).  When failures are at or below this count the per-failure
+            penalty is reduced from 0.50 to 0.20, reflecting that they are
+            likely intermittent rather than real regressions.
+
     Returns:
         int: Confidence score 0-100
     """
     total_checks = checks_passed + checks_failed + checks_skipped
-    
+
     # No checks = neutral score
     if total_checks == 0:
         return 50
-    
-    # All failed = 0
+
+    # All failed = 0 (even if some are known-flaky, this many failures is a signal)
     if checks_passed == 0 and checks_failed > 0:
         return 0
-    
+
     # All passed = 100
     if checks_failed == 0 and checks_passed > 0:
         return 100
-    
-    # Calculate based on pass rate, penalize failures more than skipped
+
     pass_rate = checks_passed / total_checks
-    fail_rate = checks_failed / total_checks
     skip_rate = checks_skipped / total_checks
-    
-    # Weighted score: passes add, failures subtract (reduced for flaky test tolerance), skips slightly reduce
-    score = (pass_rate * 100) - (fail_rate * 50) - (skip_rate * 20)
-    
+
+    # Apply a reduced penalty when failures are plausibly flaky:
+    # - failures <= known_flaky_count  → 0.20 penalty weight (weakly penalised)
+    # - otherwise                      → 0.50 penalty weight (standard)
+    if known_flaky_count > 0 and checks_failed <= known_flaky_count:
+        fail_penalty = 0.20
+    else:
+        fail_penalty = 0.50
+
+    fail_rate = checks_failed / total_checks
+    score = (pass_rate * 100) - (fail_rate * fail_penalty * 100) - (skip_rate * 20)
+
     return max(0, min(100, int(score)))
 
 
-def calculate_pr_readiness(pr_data, review_classification, review_score):
+def calculate_pr_readiness(pr_data, review_classification, review_score,
+                           flakiness_scores=None):
     """
-    Calculate overall PR readiness combining CI and review health
-    
+    Calculate overall PR readiness combining CI and review health.
+
     Args:
         pr_data: Dict with PR info including CI checks
         review_classification: str from classify_review_health
         review_score: int from classify_review_health
-    
+        flakiness_scores: Optional dict[(check_name, job_name) -> row] from
+            get_all_flakiness_scores().  When provided, the CI confidence score
+            will use a reduced penalty for failures that are known-flaky.
+
     Returns:
         Dict with:
         {
@@ -460,11 +476,23 @@ def calculate_pr_readiness(pr_data, review_classification, review_score):
             'recommendations': List[str]
         }
     """
+    # Count how many low/medium-severity flaky checks are known for this repo.
+    # We cannot match by check name here because pr_data only carries aggregate
+    # counts, so we use the total as a conservative upper bound.
+    known_flaky_count = 0
+    if flakiness_scores:
+        known_flaky_count = sum(
+            1 for row in flakiness_scores.values()
+            if row.get('classification') == 'flaky'
+            and row.get('severity') in ('low', 'medium')
+        )
+
     # Calculate CI score
     ci_score = calculate_ci_confidence(
         pr_data.get('checks_passed', 0),
         pr_data.get('checks_failed', 0),
-        pr_data.get('checks_skipped', 0)
+        pr_data.get('checks_skipped', 0),
+        known_flaky_count=known_flaky_count,
     )
     
     # Weighted combination: 45% CI, 55% Review (reduced CI weight due to flaky tests)
@@ -509,11 +537,31 @@ def calculate_pr_readiness(pr_data, review_classification, review_score):
     checks_skipped = pr_data.get('checks_skipped', 0)
     
     if checks_failed > 2:
-        blockers.append(f"{checks_failed} CI check(s) failing")
-        recommendations.append("Fix failing CI checks before merging")
+        if known_flaky_count > 0 and checks_failed <= known_flaky_count:
+            warnings.append(
+                f"{checks_failed} CI check(s) failing — {known_flaky_count} known-flaky "
+                f"check(s) on record (reduced penalty applied)"
+            )
+            recommendations.append(
+                "Review flakiness data; failures may be intermittent — see flakiness issues"
+            )
+        else:
+            blockers.append(f"{checks_failed} CI check(s) failing")
+            recommendations.append("Fix failing CI checks before merging")
     elif checks_failed > 0:
-        warnings.append(f"{checks_failed} CI check(s) failing (possibly flaky tests)")
-        recommendations.append("Verify if failures are from known flaky tests (Selenium, Docker)")
+        if known_flaky_count > 0:
+            warnings.append(
+                f"{checks_failed} CI check(s) failing "
+                f"({known_flaky_count} known-flaky check(s) on record — likely intermittent)"
+            )
+            recommendations.append(
+                "Check flakiness issues for this repo; failure may not be a regression"
+            )
+        else:
+            warnings.append(f"{checks_failed} CI check(s) failing (possibly flaky tests)")
+            recommendations.append(
+                "Verify if failures are from known flaky tests (Selenium, Docker)"
+            )
     
     if checks_skipped > 0:
         warnings.append(f"{checks_skipped} CI check(s) skipped")

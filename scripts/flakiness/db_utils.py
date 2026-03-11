@@ -1,14 +1,11 @@
-"""Shared SQLite helpers for the flakiness detection pipeline."""
+"""Cloudflare D1 REST API client for the flakiness detection pipeline."""
 
 import os
-import sqlite3
 
+import requests
 import yaml
 
 _SCRIPTS_DIR = os.path.dirname(__file__)
-_REPO_ROOT = os.path.join(_SCRIPTS_DIR, '..', '..')
-
-DB_PATH = os.path.normpath(os.path.join(_REPO_ROOT, 'data', 'flakiness_history.db'))
 CONFIG_PATH = os.path.normpath(os.path.join(_SCRIPTS_DIR, 'flakiness_config.yml'))
 
 _config_cache = None
@@ -23,80 +20,70 @@ def load_config():
     return _config_cache
 
 
-def get_db_connection(path=None):
-    """Open (or create) the SQLite database, run init_schema, and return the connection."""
-    db_path = path or DB_PATH
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA journal_mode=WAL')
-    conn.execute('PRAGMA foreign_keys=ON')
-    init_schema(conn)
-    return conn
+def get_d1_credentials():
+    """
+    Read D1 credentials from environment variables.
+    Raises RuntimeError with a clear message if any are missing.
+    """
+    account_id = os.environ.get('CLOUDFLARE_ACCOUNT_ID')
+    db_id      = os.environ.get('CLOUDFLARE_D1_DATABASE_ID')
+    token      = os.environ.get('CLOUDFLARE_API_TOKEN')
+    missing = [k for k, v in {
+        'CLOUDFLARE_ACCOUNT_ID':    account_id,
+        'CLOUDFLARE_D1_DATABASE_ID': db_id,
+        'CLOUDFLARE_API_TOKEN':     token,
+    }.items() if not v]
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variables: {', '.join(missing)}"
+        )
+    return account_id, db_id, token
 
 
-def init_schema(conn):
-    """Create all flakiness tables if they don't exist and seed infra patterns."""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS ci_run_history (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            check_name          TEXT    NOT NULL,
-            job_name            TEXT    NOT NULL,
-            workflow_name       TEXT    NOT NULL,
-            workflow_run_id     INTEGER NOT NULL,
-            run_attempt         INTEGER NOT NULL DEFAULT 1,
-            status              TEXT    NOT NULL,
-            conclusion_category TEXT    NOT NULL,
-            commit_sha          TEXT    NOT NULL,
-            pr_number           INTEGER,
-            repo                TEXT    NOT NULL,
-            timestamp           TEXT    NOT NULL DEFAULT (datetime('now'))
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_ci_run_history_lookup
-            ON ci_run_history(check_name, job_name, repo, timestamp);
-
-        CREATE TABLE IF NOT EXISTS flakiness_scores (
-            check_name            TEXT    NOT NULL,
-            job_name              TEXT    NOT NULL,
-            workflow_name         TEXT    NOT NULL,
-            flakiness_score       REAL    NOT NULL DEFAULT 0.0,
-            severity              TEXT    NOT NULL DEFAULT 'stable',
-            classification        TEXT    NOT NULL DEFAULT 'stable',
-            total_runs            INTEGER NOT NULL DEFAULT 0,
-            failure_count         INTEGER NOT NULL DEFAULT 0,
-            flaky_failures        INTEGER NOT NULL DEFAULT 0,
-            consecutive_failures  INTEGER NOT NULL DEFAULT 0,
-            last_updated          TEXT    NOT NULL DEFAULT (datetime('now')),
-            PRIMARY KEY (check_name, job_name)
-        );
-
-        CREATE TABLE IF NOT EXISTS known_infrastructure_issues (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            pattern     TEXT NOT NULL UNIQUE,
-            category    TEXT NOT NULL DEFAULT 'infrastructure',
-            description TEXT,
-            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-    """)
-
-    conn.executemany(
-        "INSERT OR IGNORE INTO known_infrastructure_issues (pattern, category, description) VALUES (?, ?, ?)",
-        [
-            ('ECONNRESET',             'infrastructure', 'TCP connection reset — transient network issue'),
-            ('timed_out',              'infrastructure', 'GitHub Actions step conclusion: timed_out'),
-            ('timeout',                'infrastructure', 'Generic timeout — network or infrastructure issue'),
-            ('rate limit',             'infrastructure', 'API or package registry rate limit hit'),
-            ('ETIMEDOUT',              'infrastructure', 'TCP connection timed out'),
-            ('fetch failed',           'infrastructure', 'Network fetch failure — transient'),
-            ('network error',          'infrastructure', 'Generic network error'),
-            ('Could not resolve host', 'infrastructure', 'DNS resolution failure'),
-        ]
+def d1_query(account_id, db_id, token, sql, params=None):
+    """
+    Execute a SQL statement against Cloudflare D1 via the REST API.
+    Returns the raw result list from the API response.
+    Raises RuntimeError if the API reports failure.
+    """
+    url = (
+        f'https://api.cloudflare.com/client/v4/accounts/{account_id}'
+        f'/d1/database/{db_id}/query'
     )
-    conn.commit()
+    body = {'sql': sql}
+    if params is not None:
+        body['params'] = params
+    resp = requests.post(
+        url,
+        headers={
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+        },
+        json=body,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if not data.get('success'):
+        raise RuntimeError(f'D1 query failed: {data.get("errors")}')
+    return data.get('result', [])
 
 
-def get_infra_patterns(conn):
-    """Return a list of lowercase infrastructure pattern strings."""
-    rows = conn.execute("SELECT pattern FROM known_infrastructure_issues").fetchall()
+def d1_select(account_id, db_id, token, sql, params=None):
+    """
+    Execute a SELECT and return a list of row dicts.
+    Convenience wrapper around d1_query().
+    """
+    result = d1_query(account_id, db_id, token, sql, params)
+    if not result:
+        return []
+    return result[0].get('results', [])
+
+
+def get_infra_patterns(account_id, db_id, token):
+    """Return a list of lowercase infrastructure pattern strings from D1."""
+    rows = d1_select(
+        account_id, db_id, token,
+        'SELECT pattern FROM known_infrastructure_issues',
+    )
     return [row['pattern'].lower() for row in rows]
