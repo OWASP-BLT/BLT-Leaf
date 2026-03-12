@@ -10,3 +10,7 @@ dist/
 *.pyc
 __pycache__/
 .pytest_cache/
+
+# Flakiness pipeline artifacts
+data/flakiness_report.md
+data/flakiness_metrics.json
