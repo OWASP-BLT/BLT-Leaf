@@ -395,19 +395,20 @@ async def delete_timeline_from_db(env, owner, repo, pr_number):
 
 
 async def get_all_flakiness_scores(db):
-    """Return a dict keyed by (check_name, job_name) from the flakiness_scores table.
+    """Return a dict keyed by (repo, workflow_name, check_name, job_name).
 
     Returns an empty dict if the table does not exist yet (before the first
     sync from the flakiness detector workflow).
     """
     try:
         result = await db.prepare(
-            'SELECT check_name, job_name, flakiness_score, severity, classification '
+            'SELECT repo, workflow_name, check_name, job_name, '
+            'flakiness_score, severity, classification '
             'FROM flakiness_scores'
         ).all()
         rows = result.results.to_py() if hasattr(result.results, 'to_py') else list(result.results)
         return {
-            (r['check_name'], r['job_name']): dict(r)
+            (r['repo'], r['workflow_name'], r['check_name'], r['job_name']): dict(r)
             for r in rows
         }
     except Exception as e:
@@ -415,16 +416,21 @@ async def get_all_flakiness_scores(db):
         return {}
 
 
-async def get_flakiness_score(db, check_name, job_name):
+async def get_flakiness_score(db, repo, workflow_name, check_name, job_name):
     """Return a single flakiness_scores row as a dict, or None if not found."""
     try:
         result = await db.prepare(
-            'SELECT check_name, job_name, flakiness_score, severity, classification '
-            'FROM flakiness_scores WHERE check_name = ? AND job_name = ?'
-        ).bind(check_name, job_name).first()
+            'SELECT repo, workflow_name, check_name, job_name, '
+            'flakiness_score, severity, classification '
+            'FROM flakiness_scores '
+            'WHERE repo = ? AND workflow_name = ? AND check_name = ? AND job_name = ?'
+        ).bind(repo, workflow_name, check_name, job_name).first()
         if not result:
             return None
         return result.to_py() if hasattr(result, 'to_py') else dict(result)
     except Exception as e:
-        print(f"Flakiness: Error loading score for {check_name}/{job_name}: {str(e)}")
+        print(
+            "Flakiness: Error loading score for "
+            f"{repo}/{workflow_name}/{check_name}/{job_name}: {str(e)}"
+        )
         return None

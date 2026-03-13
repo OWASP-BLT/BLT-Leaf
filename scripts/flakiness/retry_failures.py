@@ -161,7 +161,7 @@ def main():
                   f'{args.workflow_run_id}…', file=sys.stderr)
             for job in failed_jobs:
                 print(f'[retry] Retrying failed job: {job}', file=sys.stderr)
-                print(f'[retry] Simulated retry result: success', file=sys.stderr)
+                print('[retry] Simulated retry result: success', file=sys.stderr)
                 result[job] = 'confirmed_flake'
                 print(f'[retry] Marked as flaky: {job!r} (passed on retry — '
                       'skipping D1 write)', file=sys.stderr)
@@ -179,6 +179,12 @@ def main():
         print(json.dumps(result))
         return 0
 
+    if '/' not in args.repo:
+        print(f"Error: --repo must be in 'owner/repo' format, got '{args.repo}'", file=sys.stderr)
+        for job in failed_jobs:
+            result[job] = 'malformed_repo_arg'
+        print(json.dumps(result))
+        return 1
     owner, repo_name = args.repo.split('/', 1)
     account_id, db_id, token = get_d1_credentials()
 

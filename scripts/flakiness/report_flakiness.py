@@ -52,13 +52,20 @@ def _gh_headers(token):
 # GitHub Issue helpers
 # ---------------------------------------------------------------------------
 
-def _issue_title(check_name, prefix):
-    return f'{prefix} {check_name}'
+def _check_identity(check_name, job_name, workflow_name):
+    check_name    = check_name or 'unknown'
+    job_name      = job_name or 'unknown'
+    workflow_name = workflow_name or 'unknown'
+    return f'{workflow_name} / {job_name} / {check_name}'
 
 
-def search_flaky_issue(owner, repo, check_name, token, prefix):
+def _issue_title(check_name, job_name, workflow_name, prefix):
+    return f'{prefix} {_check_identity(check_name, job_name, workflow_name)}'
+
+
+def search_flaky_issue(owner, repo, check_name, job_name, workflow_name, token, prefix):
     """Return the first matching GitHub issue or None."""
-    title = _issue_title(check_name, prefix)
+    title = _issue_title(check_name, job_name, workflow_name, prefix)
     query = f'"{title}" repo:{owner}/{repo} is:issue'
     resp = requests.get(
         f'{GITHUB_API}/search/issues',
@@ -74,12 +81,14 @@ def search_flaky_issue(owner, repo, check_name, token, prefix):
 
 def create_issue(owner, repo, entry, token, config, labels):
     check_name = entry['check_name']
+    job_name = entry.get('job_name')
+    workflow_name = entry.get('workflow_name')
     prefix     = config.get('github', {}).get('issue_title_prefix', '[Flaky Test]')
     resp = requests.post(
         f'{GITHUB_API}/repos/{owner}/{repo}/issues',
         headers=_gh_headers(token),
         json={
-            'title':  _issue_title(check_name, prefix),
+            'title':  _issue_title(check_name, job_name, workflow_name, prefix),
             'body':   _build_issue_body(entry),
             'labels': labels,
         },
@@ -111,6 +120,8 @@ def reopen_issue(owner, repo, issue_number, token):
 
 def _build_issue_body(entry):
     check_name    = entry.get('check_name', 'unknown')
+    job_name      = entry.get('job_name', 'unknown')
+    workflow_name = entry.get('workflow_name', 'unknown')
     score         = entry.get('flakiness_score', 0.0)
     severity      = entry.get('severity', 'unknown')
     classification = entry.get('classification', 'unknown')
@@ -121,9 +132,10 @@ def _build_issue_body(entry):
     now           = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
 
     return f"""\
-## Flaky CI Check: `{check_name}`
+## Flaky CI Check: `{_check_identity(check_name, job_name, workflow_name)}`
 
 **Detected:** {now}
+**Workflow:** `{workflow_name}` | **Job:** `{job_name}`
 **Classification:** `{classification}` | **Severity:** `{severity}`
 **Flakiness Score:** {score:.2%}
 
@@ -158,7 +170,8 @@ def post_pr_comment(owner, repo, pr_number, flaky_entries, token):
     if not flaky_entries:
         return
     rows = '\n'.join(
-        f'| `{e["check_name"]}` | {e["severity"]} | {e["flakiness_score"]:.2%} '
+        f'| `{_check_identity(e.get("check_name"), e.get("job_name"), e.get("workflow_name"))}` '
+        f'| {e["severity"]} | {e["flakiness_score"]:.2%} '
         f'| {e["failure_count"]}/{e["total_runs"]} |'
         for e in flaky_entries
     )
@@ -166,8 +179,8 @@ def post_pr_comment(owner, repo, pr_number, flaky_entries, token):
         '## :test_tube: Flaky Tests Detected\n\n'
         'The following CI checks were classified as **flaky** in this run. '
         'They will **not block merge**.\n\n'
-        '| Check | Severity | Flakiness Score | Failures / Runs |\n'
-        '|-------|----------|----------------|------------------|\n'
+        '| Workflow / Job / Check | Severity | Flakiness Score | Failures / Runs |\n'
+        '|------------------------|----------|----------------|------------------|\n'
         f'{rows}\n\n'
         '> Flaky checks fail intermittently without a code regression. '
         'Maintainers have been notified via GitHub Issues.'
@@ -193,14 +206,15 @@ def _build_markdown_report(all_scores, repo):
 
     flaky_sorted = sorted(flaky, key=lambda x: x['flakiness_score'], reverse=True)
     flaky_rows   = '\n'.join(
-        f'| `{e["check_name"]}` | `{e["job_name"]}` | {e["severity"]} '
+        f'| `{e["workflow_name"]}` | `{e["job_name"]}` | `{e["check_name"]}` | {e["severity"]} '
         f'| {e["flakiness_score"]:.2%} | {e["failure_count"]}/{e["total_runs"]} '
         f'| {str(e.get("last_updated", ""))[:10]} |'
         for e in flaky_sorted[:20]
     ) or '_No flaky tests detected._'
 
     det_rows = '\n'.join(
-        f'| `{e["check_name"]}` | `{e["job_name"]}` | {e["consecutive_failures"]} consecutive |'
+        f'| `{e["workflow_name"]}` | `{e["job_name"]}` | `{e["check_name"]}` '
+        f'| {e["consecutive_failures"]} consecutive |'
         for e in deterministic[:10]
     ) or '_None._'
 
@@ -219,14 +233,14 @@ Generated: {now}
 
 ## Top Flaky Checks
 
-| Check | Job | Severity | Score | Failures / Runs | Last Updated |
-|-------|-----|----------|-------|-----------------|--------------|
+| Workflow | Job | Check | Severity | Score | Failures / Runs | Last Updated |
+|----------|-----|-------|----------|-------|-----------------|--------------|
 {flaky_rows}
 
 ## Deterministic Failures
 
-| Check | Job | Evidence |
-|-------|-----|----------|
+| Workflow | Job | Check | Evidence |
+|----------|-----|-------|----------|
 {det_rows}
 
 ---
@@ -256,9 +270,13 @@ def main():
 
     config = load_config()
 
+    if '/' not in args.repo:
+        print(f"Error: --repo must be in 'owner/repo' format, got '{args.repo}'", file=sys.stderr)
+        return 1
+    owner, repo_name = args.repo.split('/', 1)
+
     if not args.dry_run:
         account_id, db_id, token = get_d1_credentials()
-    owner, repo_name = args.repo.split('/', 1)
 
     # Load flaky report
     if args.flaky_report:
@@ -301,23 +319,27 @@ def main():
     if not args.no_github and not args.dry_run and args.github_token:
         for entry in flaky_entries:
             check_name = entry['check_name']
+            job_name = entry.get('job_name')
+            workflow_name = entry.get('workflow_name')
+            identity = _check_identity(check_name, job_name, workflow_name)
             existing   = search_flaky_issue(
-                owner, repo_name, check_name, args.github_token, prefix
+                owner, repo_name, check_name, job_name, workflow_name,
+                args.github_token, prefix
             )
             if existing is None:
                 create_issue(owner, repo_name, entry, args.github_token,
                              config, [label_flaky, label_infra])
-                print(f'[report] Created issue for: {check_name}', file=sys.stderr)
+                print(f'[report] Created issue for: {identity}', file=sys.stderr)
             elif existing.get('state') == 'closed':
                 reopen_issue(owner, repo_name, existing['number'], args.github_token)
                 add_issue_comment(owner, repo_name, existing['number'],
                                   entry, args.github_token)
-                print(f'[report] Reopened issue #{existing["number"]} for: {check_name}',
+                print(f'[report] Reopened issue #{existing["number"]} for: {identity}',
                       file=sys.stderr)
             else:
                 add_issue_comment(owner, repo_name, existing['number'],
                                   entry, args.github_token)
-                print(f'[report] Updated issue #{existing["number"]} for: {check_name}',
+                print(f'[report] Updated issue #{existing["number"]} for: {identity}',
                       file=sys.stderr)
 
         # --- PR comment ---
@@ -340,7 +362,8 @@ def main():
     else:
         all_scores = d1_select(
             account_id, db_id, token,
-            'SELECT * FROM flakiness_scores ORDER BY flakiness_score DESC',
+            'SELECT * FROM flakiness_scores WHERE repo = ? ORDER BY flakiness_score DESC',
+            [args.repo],
         )
 
     os.makedirs(DATA_DIR, exist_ok=True)

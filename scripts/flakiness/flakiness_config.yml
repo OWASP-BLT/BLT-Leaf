@@ -19,8 +19,8 @@ infrastructure_patterns:
   - "fetch failed"
   - "network error"
   - "Could not resolve host"
-  - "dependency"
-  - "upstream"
+  - "npm ERR!"
+  - "pip install failed"
 
 labels:
   flaky_test:     "flaky-test"

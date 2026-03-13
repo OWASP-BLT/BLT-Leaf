@@ -87,7 +87,7 @@ def analyze_check(rows, config):
         classification = 'deterministic'
     elif failure_rate > flaky_max:
         classification = 'deterministic'
-    elif failure_rate >= flaky_min:
+    elif failure_rate >= flaky_min and flaky_count > 0:
         classification = 'flaky'
     else:
         classification = 'stable'
@@ -180,8 +180,9 @@ def main():
             )
             print(f'[dry-run]   Skipping D1 upsert for {check_name!r}', file=sys.stderr)
 
-            entry = {'check_name': check_name, 'job_name': job_name,
-                     'workflow_name': workflow_name, **result}
+            entry = {'repo': args.repo, 'check_name': check_name,
+                     'job_name': job_name, 'workflow_name': workflow_name,
+                     **result}
             report[result['classification']].append(entry)
 
         n_flaky = len(report['flaky'])
@@ -219,10 +220,10 @@ def main():
                 """
                 SELECT status, conclusion_category
                 FROM ci_run_history
-                WHERE repo = ? AND check_name = ? AND job_name = ?
+                WHERE repo = ? AND check_name = ? AND job_name = ? AND workflow_name = ?
                 ORDER BY timestamp ASC
                 """,
-                [args.repo, check_name, job_name],
+                [args.repo, check_name, job_name, workflow_name],
             )
 
             result = analyze_check(history, config)
@@ -233,11 +234,12 @@ def main():
                 account_id, db_id, token,
                 """
                 INSERT INTO flakiness_scores
-                    (check_name, job_name, workflow_name, flakiness_score, severity,
+                    (repo, workflow_name, check_name, job_name, flakiness_score, severity,
                      classification, total_runs, failure_count, flaky_failures,
                      consecutive_failures, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                ON CONFLICT(check_name, job_name) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(repo, workflow_name, check_name, job_name) DO UPDATE SET
+                    repo                 = excluded.repo,
                     workflow_name        = excluded.workflow_name,
                     flakiness_score      = excluded.flakiness_score,
                     severity             = excluded.severity,
@@ -249,7 +251,7 @@ def main():
                     last_updated         = excluded.last_updated
                 """,
                 [
-                    check_name, job_name, workflow_name,
+                    args.repo, workflow_name, check_name, job_name,
                     result['flakiness_score'], result['severity'],
                     result['classification'], result['total_runs'],
                     result['failure_count'], result['flaky_failures'],
@@ -258,6 +260,7 @@ def main():
             )
 
             entry = {
+                'repo':          args.repo,
                 'check_name':    check_name,
                 'job_name':      job_name,
                 'workflow_name': workflow_name,

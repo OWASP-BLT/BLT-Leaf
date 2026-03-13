@@ -459,7 +459,7 @@ def calculate_pr_readiness(pr_data, review_classification, review_score,
         pr_data: Dict with PR info including CI checks
         review_classification: str from classify_review_health
         review_score: int from classify_review_health
-        flakiness_scores: Optional dict[(check_name, job_name) -> row] from
+        flakiness_scores: Optional dict[(repo, workflow_name, check_name, job_name) -> row] from
             get_all_flakiness_scores().  When provided, the CI confidence score
             will use a reduced penalty for failures that are known-flaky.
 
@@ -481,9 +481,13 @@ def calculate_pr_readiness(pr_data, review_classification, review_score,
     # counts, so we use the total as a conservative upper bound.
     known_flaky_count = 0
     if flakiness_scores:
+        repo_owner = pr_data.get('repo_owner')
+        repo_name = pr_data.get('repo_name')
+        repo = f"{repo_owner}/{repo_name}" if repo_owner and repo_name else None
         known_flaky_count = sum(
             1 for row in flakiness_scores.values()
-            if row.get('classification') == 'flaky'
+            if row.get('repo') == repo
+            and row.get('classification') == 'flaky'
             and row.get('severity') in ('low', 'medium')
         )
 

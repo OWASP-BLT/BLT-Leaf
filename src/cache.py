@@ -45,8 +45,8 @@ _TIMELINE_CACHE_TTL = 1800
 # flakiness_detector workflow runs (typically once per CI run), so a long TTL
 # is appropriate to avoid repeated D1 lookups inside a Worker isolate.
 _flakiness_cache = {
-    # Structure: {'data': dict[(check_name, job_name) -> row], 'timestamp': float}
-    # or empty when not yet loaded
+    # Structure: {'data': dict[(repo, workflow_name, check_name, job_name) -> row],
+    # 'timestamp': float} or empty when not yet loaded
 }
 # Cache TTL in seconds (60 minutes)
 _FLAKINESS_CACHE_TTL = 3600
@@ -339,8 +339,8 @@ async def get_cached_flakiness_scores(env):
         db = get_db(env)
         scores = await get_all_flakiness_scores(db)
     except Exception as e:
-        print(f"Flakiness Cache: D1 load failed ({str(e)}), returning empty dict")
-        scores = {}
+        print(f"Flakiness Cache: D1 load failed ({str(e)}), not caching")
+        return {}
 
     _flakiness_cache['data']      = scores
     _flakiness_cache['timestamp'] = current_time

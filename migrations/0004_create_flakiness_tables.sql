@@ -45,7 +45,6 @@ CREATE TABLE IF NOT EXISTS known_infrastructure_issues (
     description TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
-
 INSERT OR IGNORE INTO known_infrastructure_issues (pattern, category, description) VALUES
     ('ECONNRESET',              'infrastructure', 'TCP connection reset — transient network issue'),
     ('timed_out',               'infrastructure', 'GitHub Actions step conclusion: timed_out'),
@@ -54,4 +53,6 @@ INSERT OR IGNORE INTO known_infrastructure_issues (pattern, category, descriptio
     ('ETIMEDOUT',               'infrastructure', 'TCP connection timed out'),
     ('fetch failed',            'infrastructure', 'Network fetch failure — transient'),
     ('network error',           'infrastructure', 'Generic network error'),
-    ('Could not resolve host',  'infrastructure', 'DNS resolution failure');
+    ('Could not resolve host',  'infrastructure', 'DNS resolution failure'),
+    ('dependency',              'infrastructure', 'Dependency installation or resolution failure'),
+    ('upstream',                'infrastructure', 'Upstream service or dependency issue');
