@@ -1169,6 +1169,11 @@ async def handle_github_webhook(request, env):
                         }),
                         {'headers': {'Content-Type': 'application/json'}}
                     )
+                else:
+                    return Response.new(
+                        json.dumps({'error': 'Failed to fetch PR data from GitHub'}),
+                        {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+                    )
             
             # Handle synchronized (new commits) or edited PRs - update data
             elif action in ['synchronize', 'edited']:
@@ -1191,6 +1196,11 @@ async def handle_github_webhook(request, env):
                             'message': f'PR #{pr_number} has been updated'
                         }),
                         {'headers': {'Content-Type': 'application/json'}}
+                    )
+                else:
+                    return Response.new(
+                        json.dumps({'error': 'Failed to fetch PR data from GitHub'}),
+                        {'status': 500, 'headers': {'Content-Type': 'application/json'}}
                     )
         
         # Handle other event types - update PR data to refresh behind_by and mergeable_state
