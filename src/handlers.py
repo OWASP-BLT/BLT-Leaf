@@ -1077,7 +1077,7 @@ async def handle_github_webhook(request, env):
                 # Fetch fresh PR data and add to tracking
                 webhook_token = getattr(env, 'GITHUB_TOKEN', None)
                 fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number, webhook_token)
-                if fetched_pr_data:
+                if fetched_pr_data and not fetched_pr_data.get('not_found') and not fetched_pr_data.get('not_modified'):
                     await upsert_pr(db, pr_url, repo_owner, repo_name, pr_number, fetched_pr_data)
                     
                     # Get the newly created PR ID

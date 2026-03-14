@@ -376,14 +376,11 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
     for batch_start in range(0, len(prs_to_fetch), MAX_PRS_PER_BATCH):
         batch = prs_to_fetch[batch_start:batch_start + MAX_PRS_PER_BATCH]
         
-        # Build GraphQL query with aliases for each PR
-        # We'll fetch essential PR data in one query
         query_parts = []
-        for i, (owner, repo, pr_number) in enumerate(batch):
-            alias = f"pr{i}"
-            query_parts.append(f"""
-                {alias}: repository(owner: "{owner}", name: "{repo}") {{
-                    pullRequest(number: {pr_number}) {{
+        var_decls = []
+        variables = {}
+        
+        pr_fields = """
                         title
                         state
                         isDraft
@@ -392,49 +389,62 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
                         mergeable
                         mergeStateStatus
                         changedFiles
-                        commits {{
+                        commits {
                             totalCount
-                        }}
-                        author {{
+                        }
+                        author {
                             login
                             avatarUrl
-                        }}
-                        baseRepository {{
-                            owner {{
+                        }
+                        baseRepository {
+                            owner {
                                 avatarUrl
-                            }}
-                        }}
+                            }
+                        }
                         headRefOid
                         baseRefName
                         headRefName
-                        headRepository {{
-                            owner {{
+                        headRepository {
+                            owner {
                                 login
-                            }}
-                        }}
-                        reviewThreads(first: 100) {{
-                            nodes {{
+                            }
+                        }
+                        reviewThreads(first: 100) {
+                            nodes {
                                 isResolved
-                            }}
-                            pageInfo {{
+                            }
+                            pageInfo {
                                 hasNextPage
-                            }}
-                        }}
-                        reviews(first: 100) {{
-                            nodes {{
+                            }
+                        }
+                        reviews(first: 100) {
+                            nodes {
                                 state
                                 submittedAt
-                                author {{
+                                author {
                                     login
                                     avatarUrl
-                                }}
-                            }}
-                        }}
-                    }}
+                                }
+                            }
+                        }
+        """
+        
+        for i, (owner, repo, pr_number) in enumerate(batch):
+            var_decls.extend([
+                f"$owner{i}: String!",
+                f"$repo{i}: String!",
+                f"$pr{i}: Int!"
+            ])
+            variables[f"owner{i}"] = owner
+            variables[f"repo{i}"] = repo
+            variables[f"pr{i}"] = pr_number
+            query_parts.append(f"""
+                pr{i}: repository(owner: $owner{i}, name: $repo{i}) {{
+                    pullRequest(number: $pr{i}) {{{pr_fields}}}
                 }}
             """)
         
-        query = "query { " + " ".join(query_parts) + " }"
+        query = f"query({', '.join(var_decls)}) {{ {' '.join(query_parts)} }}"
         
         headers = {
             'Accept': 'application/vnd.github+json',
@@ -446,11 +456,10 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
             headers['Authorization'] = f'Bearer {token}'
         
         try:
-            # Make GraphQL request
             options = to_js({
                 "method": "POST",
                 "headers": headers,
-                "body": json.dumps({"query": query})
+                "body": json.dumps({"query": query, "variables": variables})
             }, dict_converter=Object.fromEntries)
             
             response = await fetch(graphql_url, options)
