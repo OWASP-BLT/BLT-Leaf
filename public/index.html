@@ -2113,7 +2113,7 @@
                 return '<i class="fas fa-sort text-slate-400 ml-1"></i>';
             };
 
-            const refreshVisibleApiCalls = Math.ceil(allPrs.length / 50) * 2;
+            const refreshVisibleApiCalls = Math.ceil(prs.length / 50) * 2;
             const scopedRepos = currentRepo === 'all'
             ? repos
                 .filter(r => !currentOrg || r.repo_owner === currentOrg)
@@ -3369,7 +3369,11 @@
                 btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
                 btn.classList.add('opacity-70', 'cursor-not-allowed');
                 try {
-                    const visiblePrIds = allPrs.map(pr => pr.id);
+                    const visiblePrIds = Array.from(
+                        document.querySelectorAll('#prTableBody tr[id^="pr-row-"]')
+                    ).map(row => Number.parseInt(row.id.replace('pr-row-', ''), 10))
+                    .filter(Number.isFinite);
+
                     if (visiblePrIds.length > 0) {
                         const resp = await fetch('/api/refresh-batch', {
                             method: 'POST',

@@ -736,7 +736,13 @@ async def handle_refresh_repo(request, env):
                 {'status': 403, 'headers': {'Content-Type': 'application/json'}},
             )
         
-        data = (await request.json()).to_py()
+        try:
+            data = (await request.json()).to_py()
+        except Exception:
+            return Response.new(
+                json.dumps({'error': 'Malformed JSON payload'}),
+                {'status': 400, 'headers': {'Content-Type': 'application/json'}},
+            )
         repo_param = (data.get('repo') or '').strip()
 
         if not repo_param:
@@ -2069,4 +2075,10 @@ async def handle_scheduled_refresh(env):
 
     except Exception as e:
         print(f"Scheduled refresh failed: {type(e).__name__}: {e}")
+        await notify_slack_exception(
+            getattr(env, 'SLACK_ERROR_WEBHOOK', ''),
+            e,
+            context={'handler': 'handle_scheduled_refresh'}
+        )
+        raise
 
