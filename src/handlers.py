@@ -99,7 +99,7 @@ async def handle_add_pr(request, env):
                     if 'status=403' in error_msg:
                         return Response.new(json.dumps({'error': 'Rate Limit Exceeded'}), 
                                           {'status': 403, 'headers': {'Content-Type': 'application/json'}})
-                    return Response.new(json.dumps({'error': f'Failed to fetch organization repos: {error_msg}'}), 
+                    return Response.new(json.dumps({'error': 'Failed to fetch organization repos'}), 
                                       {'status': 400, 'headers': {'Content-Type': 'application/json'}})
                 
                 if not org_repos:
@@ -418,7 +418,7 @@ async def handle_list_prs(env, repo_filter=None, page=1, per_page=30, sort_by=No
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_list_prs'})
         return Response.new(
-            json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+            json.dumps({'error': 'Internal server error'}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
         )
 
@@ -448,7 +448,7 @@ async def handle_list_repos(env):
                           }})
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_list_repos'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
+        return Response.new(json.dumps({'error': 'Internal server error'}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 async def handle_list_authors(env):
@@ -474,7 +474,7 @@ async def handle_list_authors(env):
                           }})
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_list_authors'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+        return Response.new(json.dumps({'error': 'Internal server error'}),
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 
@@ -601,7 +601,7 @@ async def handle_refresh_pr(request, env):
         
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_refresh_pr'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+        return Response.new(json.dumps({'error': 'Internal server error'}),
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 async def handle_batch_refresh_prs(request, env):
@@ -690,7 +690,7 @@ async def handle_batch_refresh_prs(request, env):
                 updated_prs.append({'pr_id': pr_id, 'pr_number': pr_number})
             except Exception as update_error:
                 print(f"Error updating PR #{pr_number} in {owner}/{repo}: {str(update_error)}")
-                errors.append({'pr_id': pr_id, 'pr_number': pr_number, 'error': str(update_error)})
+                errors.append({'pr_id': pr_id, 'pr_number': pr_number, 'error': 'Update failed'})
         
         return Response.new(json.dumps({
             'success': True,
@@ -705,7 +705,7 @@ async def handle_batch_refresh_prs(request, env):
         
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_batch_refresh_prs'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+        return Response.new(json.dumps({'error': 'Internal server error'}),
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
         
 async def handle_refresh_org(request, env):
@@ -736,7 +736,7 @@ async def handle_refresh_org(request, env):
             if 'status=403' in error_msg:
                 return Response.new(json.dumps({'error': 'Rate Limit Exceeded'}),
                                   {'status': 403, 'headers': {'Content-Type': 'application/json'}})
-            return Response.new(json.dumps({'error': f'Failed to fetch organization repos: {error_msg}'}),
+            return Response.new(json.dumps({'error': 'Failed to fetch organization repos'}),
                               {'status': 400, 'headers': {'Content-Type': 'application/json'}})
 
         if not org_repos:
@@ -828,7 +828,7 @@ async def handle_refresh_org(request, env):
 
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_refresh_org'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+        return Response.new(json.dumps({'error': 'Internal server error'}),
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 
@@ -868,7 +868,7 @@ async def handle_rate_limit(env):
         print(f"Error in handle_rate_limit: {str(e)}")
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_rate_limit'})
         return Response.new(
-            json.dumps({'error': 'Internal server error fetching rate status'}), 
+            json.dumps({'error': 'Internal server error'}), 
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
         )
 
@@ -898,7 +898,7 @@ async def handle_status(env):
         # Database not configured
         return Response.new(json.dumps({
             'database_configured': False,
-            'error': str(e),
+            'error': 'Database not configured',
             'environment': getattr(env, 'ENVIRONMENT', 'unknown'),
             'row_counts': {
                 'prs': 0,
@@ -943,7 +943,7 @@ async def handle_pr_updates_check(env):
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_pr_updates_check'})
         return Response.new(
-            json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+            json.dumps({'error': 'Internal server error'}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
         )
 
@@ -974,7 +974,7 @@ async def handle_get_pr(env, pr_id):
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_get_pr'})
         return Response.new(
-            json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+            json.dumps({'error': 'Internal server error'}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
         )
 
@@ -1328,7 +1328,7 @@ async def handle_github_webhook(request, env):
         print(f"Error handling webhook: {type(e).__name__}: {str(e)}")
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_github_webhook'})
         return Response.new(
-            json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+            json.dumps({'error': 'Internal server error'}),
             {'status': 500, 'headers': {'Content-Type': 'application/json'}}
         )
 
@@ -1423,7 +1423,7 @@ async def handle_pr_timeline(request, env, path):
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_pr_timeline'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
+        return Response.new(json.dumps({'error': 'Internal server error'}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 async def handle_pr_review_analysis(request, env, path):
@@ -1530,7 +1530,7 @@ async def handle_pr_review_analysis(request, env, path):
                           {'headers': {'Content-Type': 'application/json'}})
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_pr_review_analysis'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
+        return Response.new(json.dumps({'error': 'Internal server error'}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 async def _run_readiness_analysis(env, pr, pr_id, github_token):
@@ -1707,7 +1707,7 @@ async def handle_pr_readiness(request, env, path):
         )
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_pr_readiness'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}), 
+        return Response.new(json.dumps({'error': 'Internal server error'}), 
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 
