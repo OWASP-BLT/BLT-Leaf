@@ -11,6 +11,7 @@ from handlers import (
     handle_list_authors,
     handle_refresh_pr,
     handle_batch_refresh_prs,
+    handle_refresh_repo,
     handle_refresh_org,
     handle_rate_limit,
     handle_status,
@@ -114,6 +115,8 @@ async def on_fetch(request, env):
             response = await handle_refresh_pr(request, env)
         elif path == '/api/refresh-batch' and request.method == 'POST':
             response = await handle_batch_refresh_prs(request, env)
+        elif path == '/api/refresh-repo' and request.method == 'POST':
+            response = await handle_refresh_repo(request, env)
         elif path == '/api/refresh-org' and request.method == 'POST':
             response = await handle_refresh_org(request, env)
         elif path == '/api/rate-limit' and request.method == 'GET':
