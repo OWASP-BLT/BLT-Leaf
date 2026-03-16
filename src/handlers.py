@@ -210,8 +210,9 @@ async def handle_add_pr(request, env):
             try:
                 parsed = parse_pr_url(pr_url)
             except ValueError as e:
+                print(f"Invalid PR URL from client: {str(e)}")
                 return Response.new(
-                    json.dumps({'error': str(e)}),
+                    json.dumps({'error': 'Invalid PR URL'}),
                     {'status': 400, 'headers': {'Content-Type': 'application/json'}}
                 )
             
@@ -904,7 +905,7 @@ async def handle_status(env):
                 'prs': 0,
                 'timeline_cache': 0
             }
-        }), {'headers': {'Content-Type': 'application/json'}})
+        }), {'status': 503, 'headers': {'Content-Type': 'application/json'}})
 
 async def handle_pr_updates_check(env):
     """
