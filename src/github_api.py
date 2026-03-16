@@ -946,12 +946,15 @@ async def fetch_repo_comparison_batch(owner, repo, repo_open_prs, token=None):
             raise Exception(f"GraphQL comparison batch failed: status={response.status}")
 
         result = (await response.json()).to_py()
+        
         if 'errors' in result:
-            raise Exception(f"GraphQL comparison batch errors: {result['errors']}")
+            print(f"GraphQL comparison batch errors: {result['errors']}")
 
-        repo_data = result.get('data', {}).get('repository')
-        if not repo_data:
-            raise Exception(f"GraphQL comparison batch returned no repository for {owner}/{repo}")
+        repo_data = (result.get('data') or {}).get('repository') or {}
+        for i, pr_number in index_to_pr_number.items():
+             alias = f"cmp{i}"
+             ref_data = repo_data.get(alias, {})
+             compare_data = ref_data.get('compare') if ref_data else None
         for i, pr_number in index_to_pr_number.items():
             alias = f"cmp{i}"
             ref_data = repo_data.get(alias, {})

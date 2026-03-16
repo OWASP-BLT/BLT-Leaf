@@ -722,14 +722,15 @@ async def handle_refresh_repo(request, env):
     """
     try:
         caller_token = (request.headers.get('x-github-token') or '').strip()
-        if not caller_token:
+        user_token = caller_token or getattr(env, 'GITHUB_TOKEN', None)
+        if not user_token:
             return Response.new(
-                json.dumps({'error': 'Unauthorized: x-github-token header is required'}),
+                json.dumps({'error': 'Unauthorized: GitHub token is required'}),
                 {'status': 401, 'headers': {'Content-Type': 'application/json'}},
             )
-  
-
-        if len(caller_token.strip()) >= 20 and (' ' not in caller_token.strip()) and ('\t' not in caller_token.strip()):
+        
+        # Validate caller-supplied token only when present
+        if caller_token and (len(caller_token) < 20 or any(ch.isspace() for ch in caller_token)):
             return Response.new(
                 json.dumps({'error': 'Forbidden: invalid x-github-token format'}),
                 {'status': 403, 'headers': {'Content-Type': 'application/json'}},
@@ -737,7 +738,6 @@ async def handle_refresh_repo(request, env):
         
         data = (await request.json()).to_py()
         repo_param = (data.get('repo') or '').strip()
-        user_token = request.headers.get('x-github-token') or getattr(env, 'GITHUB_TOKEN', None)
 
         if not repo_param:
             return Response.new(json.dumps({'error': 'repo parameter is required (owner/name)'}),
@@ -894,7 +894,7 @@ async def handle_refresh_repo(request, env):
 
     except Exception as e:
         await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_refresh_repo'})
-        return Response.new(json.dumps({'error': f"{type(e).__name__}: {str(e)}"}),
+        return Response.new(json.dumps({'error': 'Internal server error'}),
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
         
 async def handle_refresh_org(request, env):
