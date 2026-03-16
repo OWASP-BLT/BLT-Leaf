@@ -1913,13 +1913,17 @@ async def handle_scheduled_refresh(env):
 
     Two-phase approach to minimise GitHub API consumption:
 
-    Phase 1 — Repository-level refresh (one REST call per unique repo):
+    Phase 1 — Repository-level refresh (REST requests with pagination per unique repo):
         For each repository currently tracked, fetch the list of open PR numbers.
+        REST requests are issued in paginated batches per repository; the actual number
+        of API calls depends on repository pagination size and total PR count.
         PRs that are no longer open are removed from the database immediately.
         New PRs that are now open (and not yet tracked) are added with basic data so they appear in the dashboard without waiting for a manual import.
 
-    Phase 2 — PR-level refresh (one GraphQL call per 50 PRs):
+    Phase 2 — PR-level refresh (GraphQL requests in chunked/batched calls):
         Batch-update full PR data for all PRs that are confirmed still open after Phase 1.
+        GraphQL requests are issued in chunked/batched calls; the actual number of API calls
+        depends on chunk size and total PR count after Phase 1.
     """
     token = getattr(env, 'GITHUB_TOKEN', None)
 
