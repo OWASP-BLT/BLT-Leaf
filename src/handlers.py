@@ -721,6 +721,20 @@ async def handle_refresh_repo(request, env):
     behind_by for all tracked PRs in the repository via batched comparisons.
     """
     try:
+        caller_token = (request.headers.get('x-github-token') or '').strip()
+        if not caller_token:
+            return Response.new(
+                json.dumps({'error': 'Unauthorized: x-github-token header is required'}),
+                {'status': 401, 'headers': {'Content-Type': 'application/json'}},
+            )
+  
+
+        if len(caller_token.strip()) >= 20 and (' ' not in caller_token.strip()) and ('\t' not in caller_token.strip()):
+            return Response.new(
+                json.dumps({'error': 'Forbidden: invalid x-github-token format'}),
+                {'status': 403, 'headers': {'Content-Type': 'application/json'}},
+            )
+        
         data = (await request.json()).to_py()
         repo_param = (data.get('repo') or '').strip()
         user_token = request.headers.get('x-github-token') or getattr(env, 'GITHUB_TOKEN', None)
@@ -746,7 +760,7 @@ async def handle_refresh_repo(request, env):
 
         # Load currently tracked PRs for this repository
         tracked_stmt = db.prepare(
-            'SELECT id, pr_url, repo_owner, repo_name, pr_number FROM prs WHERE repo_owner = ? AND repo_name = ?'
+            'SELECT id, pr_url, repo_owner, repo_name, pr_number, behind_by FROM prs WHERE repo_owner = ? AND repo_name = ?'
         ).bind(owner, repo_name)
         tracked_result = await tracked_stmt.all()
         tracked_rows = tracked_result.results.to_py() if hasattr(tracked_result, 'results') else []
@@ -760,6 +774,7 @@ async def handle_refresh_repo(request, env):
         removed = 0
         updated = 0
         discovered = 0
+        discovered_candidates = []
 
         # Remove PRs no longer open
         closed_numbers = tracked_numbers - open_numbers
@@ -782,7 +797,12 @@ async def handle_refresh_repo(request, env):
 
             author = pr.get('author') or {}
             repo_owner_avatar = (pr.get('baseRepository') or {}).get('owner', {}).get('avatarUrl', '')
-            behind_by = behind_by_map.get(pr_number, 0)
+            behind_by = behind_by_map.get(pr_number)
+            if behind_by is None:
+                if pr_number in tracked_map:
+                    behind_by = tracked_map[pr_number]['behind_by']
+                else:
+                    continue
 
             if pr_number in tracked_map:
                 row = tracked_map[pr_number]
@@ -817,26 +837,48 @@ async def handle_refresh_repo(request, env):
                 updated += 1
             else:
                 pr_url = f"https://github.com/{owner}/{repo_name}/pull/{pr_number}"
-                pr_data = {
+                discovered_candidates.append({
+                    'pr_number': pr_number,
+                    'pr_url': pr_url,
+                    'fallback': {
                     'title': pr.get('title', ''),
                     'state': 'open',
                     'is_merged': 0,
-                    'mergeable_state': 'unknown',
-                    'files_changed': 0,
                     'author_login': author.get('login', 'ghost'),
                     'author_avatar': author.get('avatarUrl', ''),
                     'repo_owner_avatar': repo_owner_avatar,
-                    'checks_passed': 0,
-                    'checks_failed': 0,
-                    'checks_skipped': 0,
-                    'review_status': 'pending',
                     'last_updated_at': pr.get('updatedAt', ts),
-                    'commits_count': 0,
                     'behind_by': behind_by,
                     'is_draft': 1 if pr.get('isDraft') else 0,
-                    'reviewers_json': '[]'
-                }
-                await upsert_pr(db, pr_url, owner, repo_name, pr_number, pr_data)
+                    }
+                })
+
+        # Enrich newly discovered PRs before inserting to avoid placeholder CI/review fields
+        if discovered_candidates:
+            discovered_keys = [(owner, repo_name, item['pr_number']) for item in discovered_candidates]
+            batch_results = await fetch_multiple_prs_batch(discovered_keys, user_token)
+
+            for item in discovered_candidates:
+                pr_number = item['pr_number']
+                pr_url = item['pr_url']
+                fallback_data = item['fallback']
+                key = (owner, repo_name, pr_number)
+
+                pr_data = batch_results.get(key)
+
+                # Fall back to single-PR REST fetch if batch data is missing
+                if not pr_data:
+                    pr_data = await fetch_pr_data(owner, repo_name, pr_number, user_token)
+
+                if not pr_data or pr_data.get('not_found') or pr_data.get('not_modified'):
+                    print(f"Skipping discovered PR {owner}/{repo_name}#{pr_number}: unable to fetch enriched data")
+                    continue
+
+                # Keep repo-level behind_by from this refresh so values are consistent across rows
+                merged_data = {**fallback_data, **pr_data}
+                merged_data['behind_by'] = fallback_data['behind_by']
+
+                await upsert_pr(db, pr_url, owner, repo_name, pr_number, merged_data)
                 discovered += 1
 
         return Response.new(json.dumps({

@@ -842,7 +842,10 @@ async def fetch_repo_open_prs(owner, repo, token=None):
         if 'errors' in result:
             raise Exception(f"GraphQL open PR query errors: {result['errors']}")
 
-        pr_data = result.get('data', {}).get('repository', {}).get('pullRequests', {})
+        repository_data = result.get('data', {}).get('repository')
+        if not repository_data:
+            raise Exception(f"GraphQL open PR query returned no repository for {owner}/{repo}")
+        pr_data = repository_data.get('pullRequests', {})
         nodes = pr_data.get('nodes', [])
         page_info = pr_data.get('pageInfo', {})
 
@@ -946,7 +949,9 @@ async def fetch_repo_comparison_batch(owner, repo, repo_open_prs, token=None):
         if 'errors' in result:
             raise Exception(f"GraphQL comparison batch errors: {result['errors']}")
 
-        repo_data = result.get('data', {}).get('repository', {})
+        repo_data = result.get('data', {}).get('repository')
+        if not repo_data:
+            raise Exception(f"GraphQL comparison batch returned no repository for {owner}/{repo}")
         for i, pr_number in index_to_pr_number.items():
             alias = f"cmp{i}"
             ref_data = repo_data.get(alias, {})

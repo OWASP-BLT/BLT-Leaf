@@ -3393,7 +3393,12 @@
                 btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing Repos...';
                 btn.classList.add('opacity-70', 'cursor-not-allowed');
                 try {
-                    const repoKeys = [...new Set(allPrs.map(pr => `${pr.repo_owner}/${pr.repo_name}`))];
+                    const scopedRepos = currentRepo === 'all'
+                        ? repos
+                            .filter(r => !currentOrg || r.repo_owner === currentOrg)
+                            .map(r => `${r.repo_owner}/${r.repo_name}`)
+                        : [currentRepo];
+                    const repoKeys = [...new Set(scopedRepos)];
                     if (repoKeys.length === 0) {
                         showWarning('No repositories to refresh.');
                         return;
@@ -3416,6 +3421,7 @@
                         }
                     }
 
+                    await loadRepos(true);
                     await loadPrs(true);
                     invalidateApiCache();
 
