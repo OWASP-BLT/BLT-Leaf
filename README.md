@@ -34,7 +34,7 @@ BLT-Leaf/
 │   ├── 0002_create_timeline_cache.sql
 │   └── 0003_create_indexes.sql
 ├── wrangler.toml       # Cloudflare Workers configuration
-├── package.json        # npm scripts for deployment
+├── package.json        # Wrangler dependency for deployment
 ├── DEPLOYMENT.md       # Detailed deployment instructions
 ├── CODE_SPLITTING_SUMMARY.md  # Documentation on code organization
 └── README.md          # This file
@@ -186,8 +186,6 @@ The application includes comprehensive test suites for rate limiting, caching fe
 
 **Data Display Tests** (verifies project setup and data structure):
 ```bash
-npm test
-# or
 node test-data-display.js
 ```
 
@@ -205,7 +203,7 @@ node test-simple.js
 
 **Full Production Test** (requires deployment):
 ```bash
-npm run deploy
+wrangler deploy
 node test-production.js https://your-worker.workers.dev
 ```
 
@@ -219,8 +217,7 @@ The project includes a comprehensive GitHub Actions workflow that automatically 
 
 **Test Data Display Workflow** (`.github/workflows/test-data-display.yml`):
 - Runs on every push to main and pull request
-- Sets up Node.js and installs dependencies
-- Runs linting and format checks
+- Sets up Node.js and installs Wrangler
 - Verifies all required source files and configurations exist
 - Runs comprehensive data display tests (48+ automated checks)
 - Validates HTML structure, API endpoints, and database schema
@@ -228,7 +225,6 @@ The project includes a comprehensive GitHub Actions workflow that automatically 
 - **Starts live Wrangler dev server** and tests against running application
 - **Tests all API endpoints** including refresh functionality
 - **Validates refresh button** works correctly to update PR data
-- Performs security audit of dependencies
 
 The workflow ensures that:
 - The project setup is correct and complete
@@ -241,7 +237,7 @@ The workflow ensures that:
 
 To run the same checks locally:
 ```bash
-npm test
+node test-data-display.js
 ```
 
 ## Usage

@@ -322,7 +322,7 @@ function testWranglerConfig() {
   }
 }
 
-// Test 5: Verify package.json has required scripts
+// Test 5: Verify wrangler dependency in package.json
 function testPackageJson() {
   log('\n=== Testing Package Configuration ===\n', colors.blue);
 
@@ -332,18 +332,6 @@ function testPackageJson() {
     const packageContent = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
 
     testResult('package.json exists', true, 'package.json found');
-
-    // Test for essential scripts
-    const requiredScripts = ['dev', 'deploy'];
-
-    requiredScripts.forEach(script => {
-      const exists = packageContent.scripts && packageContent.scripts[script];
-      testResult(
-        `npm script: ${script}`,
-        exists,
-        exists ? `Script defined: ${packageContent.scripts[script]}` : 'Script missing'
-      );
-    });
 
     // Test for wrangler dependency
     testResult(
