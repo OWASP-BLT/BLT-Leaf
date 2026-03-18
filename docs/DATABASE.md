@@ -743,17 +743,17 @@ await save_timeline_to_db(env, owner, repo, pr_number, data)
 
 ## Quick Reference
 
-### NPM Scripts
+### Wrangler Commands
 
 ```bash
 # Apply migrations locally
-npm run db:migrate:local
+wrangler d1 migrations apply pr_tracker --local
 
 # Apply migrations to production
-npm run db:migrate:remote
+wrangler d1 migrations apply pr_tracker --remote
 
 # List migrations
-npm run db:migrations:list
+wrangler d1 migrations list pr_tracker
 ```
 
 ### Common Commands

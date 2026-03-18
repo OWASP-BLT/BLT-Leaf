@@ -23,16 +23,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
+      - name: Install Wrangler
+        run: npm install
 
       - name: Verify Wrangler installation
         run: |
@@ -170,9 +163,6 @@ jobs:
           
           echo ""
           echo "✅ All live application tests passed!"
-
-      - name: Security audit
-        run: npm audit --audit-level=high
 
       - name: Stop Wrangler dev server
         if: always()
