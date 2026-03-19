@@ -52,11 +52,12 @@ function escapeRegex(str) {
 // ── Fingerprint each asset ────────────────────────────────────────────────────
 
 const manifest = {};
+const missingAssets = [];
 
 for (const asset of ASSETS) {
     const srcPath = path.join(PUBLIC, asset);
     if (!fs.existsSync(srcPath)) {
-        console.warn(`[fingerprint] WARNING: ${asset} not found, skipping`);
+        missingAssets.push(asset);
         continue;
     }
 
@@ -88,6 +89,12 @@ for (const asset of ASSETS) {
     manifest[asset] = fingerprinted;
 }
 
+if (missingAssets.length > 0) {
+    throw new Error(
+        `[fingerprint] Missing required asset(s): ${missingAssets.join(', ')}`
+    );
+}
+
 // Persist the manifest so other tools can read it if needed.
 const manifestPath = path.join(PUBLIC, 'asset-manifest.json');
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
@@ -106,12 +113,11 @@ for (const htmlFile of HTML_FILES) {
         const ext = path.extname(original);        // '.js'
         const stem = path.basename(original, ext); // 'theme'
 
-        // Matches: src="(optional-path/)stem.ext"  or  src='…'
-        // The [^"'] before stem ensures we don't re-fingerprint already-hashed names.
-        // Already-fingerprinted names (stem.abc12345.ext) won't match because they
-        // contain extra characters between stem and ext.
+        // Matches both unhashed and hashed names:
+        //   src="(optional-path/)stem.ext"
+        //   src="(optional-path/)stem.1234abcd.ext"
         const re = new RegExp(
-            `(src=["'][^"']*)${escapeRegex(stem)}${escapeRegex(ext)}(["'])`,
+            `(src=["'][^"']*)${escapeRegex(stem)}(?:\\.[0-9a-f]{8})?${escapeRegex(ext)}(["'])`,
             'g'
         );
 

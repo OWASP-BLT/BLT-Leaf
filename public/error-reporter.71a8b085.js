@@ -1,6 +1,23 @@
 // Global error reporter: forwards JS errors to the backend,
 // which relays them to the configured SLACK_ERROR_WEBHOOK.
 (function () {
+    function safeTruncate(text, maxLen) {
+        var str = String(text || '');
+        if (str.length <= maxLen) return str;
+        return str.slice(0, Math.max(0, maxLen - 1)) + '…';
+    }
+
+    function redactSensitive(text) {
+        var str = String(text || '');
+        // Redact obvious key/value secrets and auth-like tokens.
+        str = str.replace(/(authorization|token|apikey|api[_-]?key|password|passwd|cookie|set-cookie|session|secret|bearer)\s*[:=]\s*([^\s,;]+)/gi, '$1:[redacted]');
+        // Redact email addresses.
+        str = str.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]');
+        // Redact long token-like strings.
+        str = str.replace(/\b[A-Za-z0-9_\-]{24,}\b/g, '[redacted-token]');
+        return str;
+    }
+
     function sendPayload(payload) {
         try {
             var body = JSON.stringify(payload);
@@ -75,22 +92,24 @@
         console.error = function () {
             try {
                 var args = Array.prototype.slice.call(arguments);
-                var msg = args.map(function (a) {
-                    if (a instanceof Error) {
-                        return (a.name + ': ' + a.message + '\n' + (a.stack || ''));
-                    }
-                    if (typeof a === 'object') {
-                        try { return JSON.stringify(a); } catch (_) { return '[object]'; }
-                    }
-                    return String(a);
-                }).join(' ');
+                var errors = args.filter(function (a) { return a instanceof Error; });
 
-                reportError(
-                    'ConsoleError',
-                    msg.slice(0, 300),
-                    msg.slice(0, 2000),
-                    { url: location.href, source: 'console.error' }
-                );
+                if (errors.length > 0) {
+                    var primary = errors[0];
+                    var message = redactSensitive(primary.name + ': ' + (primary.message || ''));
+                    var stack = redactSensitive(primary.stack || '');
+                    reportError(
+                        primary.name || 'ConsoleError',
+                        safeTruncate(message, 300),
+                        safeTruncate(stack || message, 2000),
+                        {
+                            url: location.href,
+                            source: 'console.error:unhandled',
+                            report_channel: 'dedupe-candidate',
+                            error_count: String(errors.length),
+                        }
+                    );
+                }
             } catch (e) { /* ignore */ }
 
             return original.apply(console, arguments);
