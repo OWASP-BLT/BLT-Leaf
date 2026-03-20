@@ -3157,6 +3157,25 @@
             }
         }
 
+         // Update Risk Summary
+            const riskSummaryCell = document.getElementById(`readiness-risk-summary-${prId}`);
+            if (riskSummaryCell) {
+                const summary = readiness.risk_summary;
+                if (summary && summary.trim()) {
+                    const colorClass = readiness.merge_ready
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : readiness.blockers && readiness.blockers.length > 0
+                            ? 'text-red-700 dark:text-red-400'
+                            : 'text-amber-700 dark:text-amber-400';
+                    riskSummaryCell.innerHTML = `
+                        <span class="text-xs ${colorClass}" title="${escapeHtml(summary)}">
+                            ${escapeHtml(summary)}
+                        </span>`;
+                } else {
+                    riskSummaryCell.innerHTML = '<span class="text-xs text-slate-400">-</span>';
+                }
+            }
+        
         function invalidateApiCache(path) {
             if (navigator.serviceWorker && navigator.serviceWorker.controller) {
                 navigator.serviceWorker.controller.postMessage({
