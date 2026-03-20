@@ -630,12 +630,8 @@ def generate_ai_risk_summary(pr_readiness_data):
     )
 
     # Call Gemini (pseudo-code; replace with actual API call)
-    try:
-        ai_summary = call_gemini_api(prompt)  
-        return ai_summary
-    except Exception as e:
-        # Fallback to deterministic summary
-        return generate_fallback_summary(pr_readiness_data)
+    # TODO: Implement actual Gemini API call
+    return generate_fallback_summary(pr_readiness_data)
 
 
 def generate_fallback_summary(pr_readiness_data):
