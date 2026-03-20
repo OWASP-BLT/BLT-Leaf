@@ -599,7 +599,7 @@ def calculate_pr_readiness(pr_data, review_classification, review_score):
     }
 
 
-`#Add` ai summary feat
+#Add ai summary feat
 def generate_ai_risk_summary(pr_readiness_data):
     """
     Generate a concise AI-powered risk summary for a PR.
