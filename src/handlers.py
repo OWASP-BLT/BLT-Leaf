@@ -755,16 +755,18 @@ async def handle_refresh_repo(request, env):
     behind_by for all tracked PRs in the repository via batched comparisons.
     """
     try:
-        caller_token = (request.headers.get('x-github-token') or '').strip()
-        user_token = caller_token or getattr(env, 'GITHUB_TOKEN', None)
+        token_info = await resolve_github_token(request, env)
+        user_token = token_info['token']
         if not user_token:
             return Response.new(
                 json.dumps({'error': 'Unauthorized: GitHub token is required'}),
                 {'status': 401, 'headers': {'Content-Type': 'application/json'}},
             )
         
-        # Validate caller-supplied token only when present
-        if caller_token and (len(caller_token) < 20 or any(ch.isspace() for ch in caller_token)):
+        # Validate caller-supplied header token format when it is the selected auth source.
+        if token_info.get('token_source') == 'header_token' and (
+            len(user_token) < 20 or any(ch.isspace() for ch in user_token)
+        ):
             return Response.new(
                 json.dumps({'error': 'Forbidden: invalid x-github-token format'}),
                 {'status': 403, 'headers': {'Content-Type': 'application/json'}},
