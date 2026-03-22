@@ -2,6 +2,7 @@
 
 import json
 import re
+import asyncio
 from datetime import datetime, timezone
 from js import Response, Headers, Object
 from pyodide.ffi import to_js
@@ -665,24 +666,36 @@ async def handle_batch_refresh_prs(request, env):
         db = get_db(env)
         prs_to_fetch = []
         pr_lookup = {}  # Maps (owner, repo, pr_number) -> (pr_id, pr_url, etag)
-        
+
+        unique_pr_ids = []
+        seen_ids = set()
         for pr_id in pr_ids:
-            stmt = db.prepare('SELECT pr_url, repo_owner, repo_name, pr_number, etag FROM prs WHERE id = ?').bind(pr_id)
-            result = await stmt.first()
-            
-            if not result:
-                print(f"PR ID {pr_id} not found, skipping")
-                continue
-            
-            result = result.to_py()
-            owner = result['repo_owner']
-            repo = result['repo_name']
-            pr_number = result['pr_number']
-            pr_url = result['pr_url']
-            etag = result.get('etag')
-            
+            if pr_id not in seen_ids:
+                seen_ids.add(pr_id)
+                unique_pr_ids.append(pr_id)
+
+        placeholders = ','.join(['?'] * len(unique_pr_ids))
+        rows_result = await db.prepare(
+            f'SELECT id, pr_url, repo_owner, repo_name, pr_number, etag FROM prs WHERE id IN ({placeholders})'
+        ).bind(*unique_pr_ids).all()
+
+        rows = rows_result.results.to_py() if hasattr(rows_result, 'results') else []
+        found_ids = set()
+        for row in rows:
+            pr_id = row['id']
+            found_ids.add(pr_id)
+            owner = row['repo_owner']
+            repo = row['repo_name']
+            pr_number = row['pr_number']
+            pr_url = row['pr_url']
+            etag = row.get('etag')
+
             prs_to_fetch.append((owner, repo, pr_number))
             pr_lookup[(owner, repo, pr_number)] = (pr_id, pr_url, etag)
+
+        for pr_id in unique_pr_ids:
+            if pr_id not in found_ids:
+                print(f"PR ID {pr_id} not found, skipping")
         
         if not prs_to_fetch:
             return Response.new(json.dumps({'error': 'No valid PRs found'}), 
@@ -823,15 +836,11 @@ async def handle_refresh_repo(request, env):
         updated = 0
         discovered = 0
         discovered_candidates = []
+        tracked_updates = []
 
         # Remove PRs no longer open
         closed_numbers = tracked_numbers - open_numbers
-        for pr_number in closed_numbers:
-            row = tracked_map[pr_number]
-            await invalidate_readiness_cache(env, row['id'])
-            await invalidate_timeline_cache(env, owner, repo_name, pr_number)
-            await db.prepare('DELETE FROM prs WHERE id = ?').bind(row['id']).run()
-            removed += 1
+        ids_to_delete = [tracked_map[pr_number]['id'] for pr_number in closed_numbers]
 
         # Compute behind_by for all open PRs in this repo
         behind_by_map = await fetch_repo_comparison_batch(owner, repo_name, repo_open_prs, user_token)
@@ -850,39 +859,22 @@ async def handle_refresh_repo(request, env):
                 if pr_number in tracked_map:
                     behind_by = tracked_map[pr_number]['behind_by']
                 else:
-                    continue
+                    # Keep newly discovered PRs even when compare data is temporarily unavailable.
+                    behind_by = 0
 
             if pr_number in tracked_map:
                 row = tracked_map[pr_number]
-                await db.prepare('''
-                    UPDATE prs
-                    SET
-                        title = ?,
-                        state = 'open',
-                        is_merged = 0,
-                        author_login = ?,
-                        author_avatar = ?,
-                        repo_owner_avatar = ?,
-                        behind_by = ?,
-                        is_draft = ?,
-                        last_updated_at = ?,
-                        last_refreshed_at = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                ''').bind(
-                    pr.get('title', ''),
-                    author.get('login', 'ghost'),
-                    author.get('avatarUrl', ''),
-                    repo_owner_avatar,
-                    behind_by,
-                    1 if pr.get('isDraft') else 0,
-                    pr.get('updatedAt', ts),
-                    ts,
-                    row['id']
-                ).run()
-                await invalidate_readiness_cache(env, row['id'])
-                await invalidate_timeline_cache(env, owner, repo_name, pr_number)
-                updated += 1
+                tracked_updates.append({
+                    'id': row['id'],
+                    'pr_number': pr_number,
+                    'title': pr.get('title', ''),
+                    'author_login': author.get('login', 'ghost'),
+                    'author_avatar': author.get('avatarUrl', ''),
+                    'repo_owner_avatar': repo_owner_avatar,
+                    'behind_by': behind_by,
+                    'is_draft': 1 if pr.get('isDraft') else 0,
+                    'last_updated_at': pr.get('updatedAt', ts)
+                })
             else:
                 pr_url = f"https://github.com/{owner}/{repo_name}/pull/{pr_number}"
                 discovered_candidates.append({
@@ -906,6 +898,29 @@ async def handle_refresh_repo(request, env):
             discovered_keys = [(owner, repo_name, item['pr_number']) for item in discovered_candidates]
             batch_results = await fetch_multiple_prs_batch(discovered_keys, user_token)
 
+            fallback_fetch_map = {}
+            missing_items = []
+            for item in discovered_candidates:
+                key = (owner, repo_name, item['pr_number'])
+                if not batch_results.get(key):
+                    missing_items.append(item)
+
+            if missing_items:
+                fallback_tasks = [
+                    fetch_pr_data(owner, repo_name, item['pr_number'], user_token)
+                    for item in missing_items
+                ]
+                fallback_results = await asyncio.gather(*fallback_tasks, return_exceptions=True)
+                for item, result in zip(missing_items, fallback_results):
+                    key = (owner, repo_name, item['pr_number'])
+                    if isinstance(result, Exception):
+                        print(f"Fallback fetch failed for {owner}/{repo_name}#{item['pr_number']}: {result}")
+                        fallback_fetch_map[key] = None
+                    else:
+                        fallback_fetch_map[key] = result
+
+            discovered_rows = []
+
             for item in discovered_candidates:
                 pr_number = item['pr_number']
                 pr_url = item['pr_url']
@@ -916,7 +931,7 @@ async def handle_refresh_repo(request, env):
 
                 # Fall back to single-PR REST fetch if batch data is missing
                 if not pr_data:
-                    pr_data = await fetch_pr_data(owner, repo_name, pr_number, user_token)
+                    pr_data = fallback_fetch_map.get(key)
 
                 if not pr_data or pr_data.get('not_found') or pr_data.get('not_modified'):
                     print(f"Skipping discovered PR {owner}/{repo_name}#{pr_number}: unable to fetch enriched data")
@@ -926,8 +941,114 @@ async def handle_refresh_repo(request, env):
                 merged_data = {**fallback_data, **pr_data}
                 merged_data['behind_by'] = fallback_data['behind_by']
 
-                await upsert_pr(db, pr_url, owner, repo_name, pr_number, merged_data)
-                discovered += 1
+                discovered_rows.append((pr_url, pr_number, merged_data))
+
+            # Apply delete/update/insert as one unit to avoid transient partial repo views.
+            await db.prepare('BEGIN').run()
+            try:
+                if ids_to_delete:
+                    delete_placeholders = ','.join(['?'] * len(ids_to_delete))
+                    await db.prepare(f'DELETE FROM prs WHERE id IN ({delete_placeholders})').bind(*ids_to_delete).run()
+
+                for update_row in tracked_updates:
+                    await db.prepare('''
+                        UPDATE prs
+                        SET
+                            title = ?,
+                            state = 'open',
+                            is_merged = 0,
+                            author_login = ?,
+                            author_avatar = ?,
+                            repo_owner_avatar = ?,
+                            behind_by = ?,
+                            is_draft = ?,
+                            last_updated_at = ?,
+                            last_refreshed_at = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''').bind(
+                        update_row['title'],
+                        update_row['author_login'],
+                        update_row['author_avatar'],
+                        update_row['repo_owner_avatar'],
+                        update_row['behind_by'],
+                        update_row['is_draft'],
+                        update_row['last_updated_at'],
+                        ts,
+                        update_row['id']
+                    ).run()
+
+                for pr_url, pr_number, merged_data in discovered_rows:
+                    await upsert_pr(db, pr_url, owner, repo_name, pr_number, merged_data)
+
+                await db.prepare('COMMIT').run()
+            except Exception:
+                await db.prepare('ROLLBACK').run()
+                raise
+
+            removed += len(ids_to_delete)
+            updated += len(tracked_updates)
+            discovered += len(discovered_rows)
+
+            for pr_number in closed_numbers:
+                row = tracked_map[pr_number]
+                await invalidate_readiness_cache(env, row['id'])
+                await invalidate_timeline_cache(env, owner, repo_name, pr_number)
+
+            for update_row in tracked_updates:
+                await invalidate_readiness_cache(env, update_row['id'])
+                await invalidate_timeline_cache(env, owner, repo_name, update_row['pr_number'])
+        else:
+            await db.prepare('BEGIN').run()
+            try:
+                if ids_to_delete:
+                    delete_placeholders = ','.join(['?'] * len(ids_to_delete))
+                    await db.prepare(f'DELETE FROM prs WHERE id IN ({delete_placeholders})').bind(*ids_to_delete).run()
+
+                for update_row in tracked_updates:
+                    await db.prepare('''
+                        UPDATE prs
+                        SET
+                            title = ?,
+                            state = 'open',
+                            is_merged = 0,
+                            author_login = ?,
+                            author_avatar = ?,
+                            repo_owner_avatar = ?,
+                            behind_by = ?,
+                            is_draft = ?,
+                            last_updated_at = ?,
+                            last_refreshed_at = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''').bind(
+                        update_row['title'],
+                        update_row['author_login'],
+                        update_row['author_avatar'],
+                        update_row['repo_owner_avatar'],
+                        update_row['behind_by'],
+                        update_row['is_draft'],
+                        update_row['last_updated_at'],
+                        ts,
+                        update_row['id']
+                    ).run()
+
+                await db.prepare('COMMIT').run()
+            except Exception:
+                await db.prepare('ROLLBACK').run()
+                raise
+
+            removed += len(ids_to_delete)
+            updated += len(tracked_updates)
+
+            for pr_number in closed_numbers:
+                row = tracked_map[pr_number]
+                await invalidate_readiness_cache(env, row['id'])
+                await invalidate_timeline_cache(env, owner, repo_name, pr_number)
+
+            for update_row in tracked_updates:
+                await invalidate_readiness_cache(env, update_row['id'])
+                await invalidate_timeline_cache(env, owner, repo_name, update_row['pr_number'])
 
         return Response.new(json.dumps({
             'success': True,
@@ -2054,35 +2175,14 @@ async def handle_scheduled_refresh(env):
                         if item['number'] not in new_numbers:
                             continue
                         pr_url = item['html_url']
-                        user = item.get('user') or {}
-                        pr_data = {
-                            'title': item.get('title', ''),
-                            'state': 'open',
-                            'is_merged': 0,
-                            'mergeable_state': 'unknown',
-                            'files_changed': 0,
-                            'author_login': user.get('login', 'ghost'),
-                            'author_avatar': user.get('avatar_url', ''),
-                            'repo_owner_avatar': item.get('base', {}).get('repo', {}).get('owner', {}).get('avatar_url', ''),
-                            'checks_passed': 0,
-                            'checks_failed': 0,
-                            'checks_skipped': 0,
-                            'review_status': 'pending',
-                            'last_updated_at': item.get('updated_at', ts),
-                            'commits_count': 0,
-                            'behind_by': 0,
-                            'is_draft': 1 if item.get('draft') else 0,
-                            'reviewers_json': '[]'
-                        }
-                        await upsert_pr(db, pr_url, owner, repo_name, item['number'], pr_data)
-                        # Queue the new row for Phase 2 so it gets a full data update immediately
-                        new_row_result = await db.prepare(
-                            'SELECT id, pr_url, repo_owner, repo_name, pr_number FROM prs WHERE pr_url = ?'
-                        ).bind(pr_url).first()
-                        if new_row_result:
-                            confirmed_open_rows.append(
-                                new_row_result.to_py() if hasattr(new_row_result, 'to_py') else dict(new_row_result)
-                            )
+                        # Defer insertion until Phase 2 to avoid persisting placeholder zero metrics.
+                        confirmed_open_rows.append({
+                            'id': None,
+                            'pr_url': pr_url,
+                            'repo_owner': owner,
+                            'repo_name': repo_name,
+                            'pr_number': item['number']
+                        })
 
             except Exception as repo_err:
                 print(f"Scheduled refresh phase 1: error scanning {owner}/{repo_name}: {repo_err}")
@@ -2123,9 +2223,10 @@ async def handle_scheduled_refresh(env):
 
             # Edge case: PR closed between Phase 1 and Phase 2
             if pr_data.get('is_merged') or pr_data.get('state') == 'closed':
-                await invalidate_readiness_cache(env, pr_id)
-                await invalidate_timeline_cache(env, owner, repo, pr_number)
-                await db.prepare('DELETE FROM prs WHERE id = ?').bind(pr_id).run()
+                if pr_id:
+                    await invalidate_readiness_cache(env, pr_id)
+                    await invalidate_timeline_cache(env, owner, repo, pr_number)
+                    await db.prepare('DELETE FROM prs WHERE id = ?').bind(pr_id).run()
                 status_msg = 'merged' if pr_data.get('is_merged') else 'closed'
                 print(f"Scheduled refresh: removed {status_msg} PR {owner}/{repo}#{pr_number}")
                 removed_phase2 += 1
@@ -2133,8 +2234,9 @@ async def handle_scheduled_refresh(env):
 
             try:
                 await upsert_pr(db, pr_url, owner, repo, pr_number, pr_data)
-                await invalidate_readiness_cache(env, pr_id)
-                await invalidate_timeline_cache(env, owner, repo, pr_number)
+                if pr_id:
+                    await invalidate_readiness_cache(env, pr_id)
+                    await invalidate_timeline_cache(env, owner, repo, pr_number)
                 updated += 1
             except Exception as update_err:
                 print(f"Scheduled refresh: error updating {owner}/{repo}#{pr_number}: {update_err}")

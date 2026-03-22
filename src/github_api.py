@@ -379,14 +379,108 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
             return ''
         return str(value).replace('\\', '\\\\').replace('"', '\\"')
 
-    def _normalize_ref_name(ref_name):
-        """Convert branch names like 'main' to GraphQL qualified refs."""
+    def _ref_candidates(ref_name):
+        """Return candidate qualified refs for a base ref name.
+
+        GitHub baseRefName is commonly a branch name, but can also map to tags.
+        """
         ref_name = (ref_name or '').strip()
         if not ref_name:
-            return ''
+            return []
         if ref_name.startswith('refs/'):
-            return ref_name
-        return f"refs/heads/{ref_name}"
+            return [ref_name]
+        return [f"refs/heads/{ref_name}", f"refs/tags/{ref_name}"]
+
+    async def _fetch_all_status_check_counts(owner, repo, head_oid):
+        """
+        Paginate statusCheckRollup contexts to avoid undercounting beyond first 100
+        """
+        
+        query = """
+        query($owner: String!, $repo: String!, $headOid: GitObjectID!, $cursor: String) {
+          repository(owner: $owner, name: $repo) {
+            object(oid: $headOid) {
+              ... on Commit {
+                statusCheckRollup {
+                  contexts(first: 100, after: $cursor) {
+                    nodes {
+                      __typename
+                      ... on CheckRun {
+                        conclusion
+                        status
+                      }
+                      ... on StatusContext {
+                        state
+                      }
+                    }
+                    pageInfo {
+                      hasNextPage
+                      endCursor
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+
+        checks_passed = 0
+        checks_failed = 0
+        checks_skipped = 0
+        cursor = None
+        has_next_page = True
+
+        while has_next_page:
+            variables = {
+                'owner': owner,
+                'repo': repo,
+                'headOid': head_oid,
+                'cursor': cursor
+            }
+            options = to_js({
+                "method": "POST",
+                "headers": headers,
+                "body": json.dumps({"query": query, "variables": variables})
+            }, dict_converter=Object.fromEntries)
+
+            response = await fetch(graphql_url, options)
+            if response.status != 200:
+                break
+
+            result = (await response.json()).to_py()
+            if 'errors' in result:
+                print(f"GraphQL check-rollup pagination errors for {owner}/{repo}: {result['errors']}")
+                break
+
+            repo_data = (result.get('data') or {}).get('repository') or {}
+            obj_data = (repo_data.get('object') or {})
+            rollup = (obj_data.get('statusCheckRollup') or {})
+            contexts = (rollup.get('contexts') or {})
+            nodes = contexts.get('nodes', [])
+            page_info = contexts.get('pageInfo') or {}
+
+            for ctx in nodes:
+                typename = ctx.get('__typename', '')
+                if typename == 'CheckRun':
+                    conclusion = (ctx.get('conclusion') or '').upper()
+                    if conclusion == 'SUCCESS':
+                        checks_passed += 1
+                    elif conclusion in ('FAILURE', 'TIMED_OUT', 'CANCELLED'):
+                        checks_failed += 1
+                    elif conclusion in ('SKIPPED', 'NEUTRAL'):
+                        checks_skipped += 1
+                elif typename == 'StatusContext':
+                    state = (ctx.get('state') or '').upper()
+                    if state == 'SUCCESS':
+                        checks_passed += 1
+                    elif state in ('FAILURE', 'ERROR'):
+                        checks_failed += 1
+
+            has_next_page = bool(page_info.get('hasNextPage'))
+            cursor = page_info.get('endCursor')
+
+        return checks_passed, checks_failed, checks_skipped
     
     # Process in batches
     for batch_start in range(0, len(prs_to_fetch), MAX_PRS_PER_BATCH):
@@ -423,6 +517,10 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
                                                 ... on StatusContext {{
                                                     state
                                                 }}
+                                            }}
+                                            pageInfo {{
+                                                hasNextPage
+                                                endCursor
                                             }}
                                         }}
                                     }}
@@ -536,26 +634,33 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
 
             # Pass 2: Batch compare all PRs from this chunk to compute accurate behind_by
             comparison_query_parts = []
-            compare_keys = list(comparison_targets.keys())
-            for i, key in enumerate(compare_keys):
+            compare_alias_to_key = {}
+            for key in comparison_targets.keys():
                 owner, repo, pr_number = key
-                compare_alias = f"cmp{i}"
-                base_ref = _normalize_ref_name(comparison_targets[key].get('base_ref'))
+                compare_alias = f"cmp{len(compare_alias_to_key)}"
+                base_ref_candidates = _ref_candidates(comparison_targets[key].get('base_ref'))
                 head_oid = comparison_targets[key].get('head_oid')
 
-                if not base_ref or not head_oid:
+                if not base_ref_candidates or not head_oid:
                     continue
 
-                comparison_query_parts.append(f"""
-                    {compare_alias}: repository(owner: "{_escape_graphql_string(owner)}", name: "{_escape_graphql_string(repo)}") {{
-                        baseRef: ref(qualifiedName: "{_escape_graphql_string(base_ref)}") {{
+                ref_parts = []
+                for ref_i, base_ref in enumerate(base_ref_candidates):
+                    ref_alias = f"ref{ref_i}"
+                    ref_parts.append(f"""
+                        {ref_alias}: ref(qualifiedName: "{_escape_graphql_string(base_ref)}") {{
                             compare(headRef: "{_escape_graphql_string(head_oid)}") {{
-                                aheadBy
                                 behindBy
                             }}
                         }}
+                    """)
+
+                comparison_query_parts.append(f"""
+                    {compare_alias}: repository(owner: "{_escape_graphql_string(owner)}", name: "{_escape_graphql_string(repo)}") {{
+                        {' '.join(ref_parts)}
                     }}
                 """)
+                compare_alias_to_key[compare_alias] = key
 
             behind_by_map = {}
             if comparison_query_parts:
@@ -573,25 +678,28 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
                         print(f"GraphQL compare errors: {comparison_result['errors']}")
                     else:
                         comparison_data = comparison_result.get('data', {})
-                        for i, key in enumerate(compare_keys):
-                            alias = f"cmp{i}"
+                        for alias, key in compare_alias_to_key.items():
                             repo_compare = comparison_data.get(alias, {})
-                            ref_data = repo_compare.get('baseRef') if repo_compare else None
-                            compare_data = ref_data.get('compare') if ref_data else None
-                            if compare_data:
-                                # Prefer behindBy. Fallback to aheadBy if behindBy is missing.
-                                behind_by = compare_data.get('behindBy')
-                                if behind_by is None:
-                                    behind_by = compare_data.get('aheadBy')
-                                behind_by_map[key] = int(behind_by or 0)
-                            else:
-                                behind_by_map[key] = 0
+                            selected_compare = None
+                            if repo_compare:
+                                for ref_key, ref_value in repo_compare.items():
+                                    if ref_key.startswith('ref') and ref_value and ref_value.get('compare'):
+                                        selected_compare = ref_value.get('compare')
+                                        break
+                            if selected_compare and selected_compare.get('behindBy') is not None:
+                                behind_by_map[key] = int(selected_compare.get('behindBy') or 0)
                 else:
                     print(f"Warning: GraphQL compare query returned status {comparison_response.status}")
-                    for key in compare_keys:
-                        behind_by_map[key] = 0
-                
-                # Transform GraphQL response to match REST API format used by fetch_pr_data
+
+            # Transform GraphQL response to match REST API format used by fetch_pr_data
+            for i, (owner, repo, pr_number) in enumerate(batch):
+                alias = f"pr{i}"
+                repo_data = data.get(alias, {})
+                pr_data = repo_data.get('pullRequest') if repo_data else None
+
+                if not pr_data:
+                    continue
+
                 author = pr_data.get('author', {})
                 base_repo = pr_data.get('baseRepository', {})
                 
@@ -631,7 +739,8 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
                 last_commit_nodes = pr_data.get('commits', {}).get('nodes', [])
                 if last_commit_nodes:
                     rollup = (last_commit_nodes[0].get('commit') or {}).get('statusCheckRollup') or {}
-                    for ctx in rollup.get('contexts', {}).get('nodes', []):
+                    contexts = rollup.get('contexts', {}) or {}
+                    for ctx in contexts.get('nodes', []):
                         typename = ctx.get('__typename', '')
                         if typename == 'CheckRun':
                             conclusion = (ctx.get('conclusion') or '').upper()
@@ -647,6 +756,15 @@ async def fetch_multiple_prs_batch(prs_to_fetch, token=None):
                                 checks_passed += 1
                             elif state in ('FAILURE', 'ERROR'):
                                 checks_failed += 1
+
+                    # If context list is paginated, fetch complete counts for accuracy.
+                    contexts_page_info = contexts.get('pageInfo') or {}
+                    if contexts_page_info.get('hasNextPage'):
+                        head_oid = pr_data.get('headRefOid')
+                        if head_oid:
+                            checks_passed, checks_failed, checks_skipped = await _fetch_all_status_check_counts(
+                                owner, repo, head_oid
+                            )
                 
                 # Build the pr_data dict matching REST API format
                 transformed_data = {
@@ -896,13 +1014,13 @@ async def fetch_repo_comparison_batch(owner, repo, repo_open_prs, token=None):
             return ''
         return str(value).replace('\\', '\\\\').replace('"', '\\"')
 
-    def _normalize_ref_name(ref_name):
+    def _ref_candidates(ref_name):
         ref_name = (ref_name or '').strip()
         if not ref_name:
-            return ''
+            return []
         if ref_name.startswith('refs/'):
-            return ref_name
-        return f"refs/heads/{ref_name}"
+            return [ref_name]
+        return [f"refs/heads/{ref_name}", f"refs/tags/{ref_name}"]
 
     behind_by_map = {}
 
@@ -915,24 +1033,27 @@ async def fetch_repo_comparison_batch(owner, repo, repo_open_prs, token=None):
 
         for i, pr in enumerate(chunk):
             pr_number = pr.get('number')
-            base_ref = _normalize_ref_name(pr.get('baseRefName'))
+            base_ref_candidates = _ref_candidates(pr.get('baseRefName'))
             head_oid = pr.get('headRefOid')
 
-            if not pr_number or not base_ref or not head_oid:
-                if pr_number:
-                    behind_by_map[pr_number] = 0
+            if not pr_number or not base_ref_candidates or not head_oid:
                 continue
 
-            alias = f"cmp{i}"
-            index_to_pr_number[i] = pr_number
-            query_parts.append(f"""
-                {alias}: ref(qualifiedName: "{_escape_graphql_string(base_ref)}") {{
-                    compare(headRef: "{_escape_graphql_string(head_oid)}") {{
-                        aheadBy
-                        behindBy
+            candidate_aliases = []
+            for ref_idx, base_ref in enumerate(base_ref_candidates):
+                alias = f"cmp{i}_{ref_idx}"
+                query_parts.append(f"""
+                    {alias}: ref(qualifiedName: "{_escape_graphql_string(base_ref)}") {{
+                        compare(headRef: "{_escape_graphql_string(head_oid)}") {{
+                            behindBy
+                        }}
                     }}
-                }}
-            """)
+                """)
+                candidate_aliases.append(alias)
+            index_to_pr_number[i] = {
+                'pr_number': pr_number,
+                'aliases': candidate_aliases
+            }
 
         if not query_parts:
             continue
@@ -965,20 +1086,23 @@ async def fetch_repo_comparison_batch(owner, repo, repo_open_prs, token=None):
         result = (await response.json()).to_py()
         
         if 'errors' in result:
-            print(f"GraphQL comparison batch errors: {result['errors']}")
+            raise Exception(f"GraphQL comparison batch errors: {result['errors']}")
 
         repo_data = (result.get('data') or {}).get('repository') or {}
-        for i, pr_number in index_to_pr_number.items():
-            alias = f"cmp{i}"
-            ref_data = repo_data.get(alias, {})
-            compare_data = ref_data.get('compare') if ref_data else None
-            if compare_data:
-                behind_by = compare_data.get('behindBy')
-                if behind_by is None:
-                    behind_by = compare_data.get('aheadBy')
-                behind_by_map[pr_number] = int(behind_by or 0)
-            else:
-                behind_by_map[pr_number] = 0
+        for _, mapped in index_to_pr_number.items():
+            pr_number = mapped['pr_number']
+            aliases = mapped['aliases']
+
+            selected_behind = None
+            for alias in aliases:
+                ref_data = repo_data.get(alias, {})
+                compare_data = ref_data.get('compare') if ref_data else None
+                if compare_data and compare_data.get('behindBy') is not None:
+                    selected_behind = int(compare_data.get('behindBy') or 0)
+                    break
+
+            if selected_behind is not None:
+                behind_by_map[pr_number] = selected_behind
 
     return behind_by_map
 
