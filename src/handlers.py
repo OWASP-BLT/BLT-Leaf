@@ -940,10 +940,7 @@ async def handle_refresh_repo(request, env):
 async def handle_refresh_org(request, env):
     """
     Discover and import new repositories and PRs for an organization.
-
-
-async def handle_refresh_org(request, env):
-    """Discover and upsert open PRs for an organization's public repositories."""
+    """
     try:
         data = (await request.json()).to_py()
         org = (data.get('org') or '').strip()

@@ -953,10 +953,6 @@ async def fetch_repo_comparison_batch(owner, repo, repo_open_prs, token=None):
 
         repo_data = (result.get('data') or {}).get('repository') or {}
         for i, pr_number in index_to_pr_number.items():
-             alias = f"cmp{i}"
-             ref_data = repo_data.get(alias, {})
-             compare_data = ref_data.get('compare') if ref_data else None
-        for i, pr_number in index_to_pr_number.items():
             alias = f"cmp{i}"
             ref_data = repo_data.get(alias, {})
             compare_data = ref_data.get('compare') if ref_data else None
