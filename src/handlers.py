@@ -809,8 +809,14 @@ async def handle_refresh_repo(request, env):
         tracked_map = {row['pr_number']: row for row in tracked_rows}
         tracked_numbers = set(tracked_map.keys())
 
-        # Fetch all open PRs from GitHub for this repo via GraphQL
-        repo_open_prs = await fetch_repo_open_prs(owner, repo_name, user_token)
+        repo_refresh_data = await fetch_repo_open_prs(owner, repo_name, user_token, include_metadata=True)
+        repo_open_prs = repo_refresh_data.get('prs', [])
+
+        caller_scoped_token = _is_caller_scoped_token(token_info)
+        if caller_scoped_token and repo_refresh_data.get('repo_is_private'):
+            print(f"Security: Rejected caller-scoped repo refresh for private repo {owner}/{repo_name}")
+            return _private_repo_rejected_response()
+
         open_numbers = {pr.get('number') for pr in repo_open_prs if pr.get('number') is not None}
 
         removed = 0
@@ -883,15 +889,15 @@ async def handle_refresh_repo(request, env):
                     'pr_number': pr_number,
                     'pr_url': pr_url,
                     'fallback': {
-                    'title': pr.get('title', ''),
-                    'state': 'open',
-                    'is_merged': 0,
-                    'author_login': author.get('login', 'ghost'),
-                    'author_avatar': author.get('avatarUrl', ''),
-                    'repo_owner_avatar': repo_owner_avatar,
-                    'last_updated_at': pr.get('updatedAt', ts),
-                    'behind_by': behind_by,
-                    'is_draft': 1 if pr.get('isDraft') else 0,
+                        'title': pr.get('title', ''),
+                        'state': 'open',
+                        'is_merged': 0,
+                        'author_login': author.get('login', 'ghost'),
+                        'author_avatar': author.get('avatarUrl', ''),
+                        'repo_owner_avatar': repo_owner_avatar,
+                        'last_updated_at': pr.get('updatedAt', ts),
+                        'behind_by': behind_by,
+                        'is_draft': 1 if pr.get('isDraft') else 0,
                     }
                 })
 
