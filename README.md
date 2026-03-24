@@ -130,6 +130,40 @@ MIGRATION_TARGET=remote ./scripts/migration.sh
 ./scripts/migration.sh
 ```
 
+### Windows (PowerShell)
+
+If you are contributing on Windows, use the following PowerShell equivalents for the setup commands above.
+
+**1. Initialize the D1 database:**
+```powershell
+wrangler d1 create pr_tracker
+```
+
+**2. Copy the example environment file:**
+```powershell
+Copy-Item .env.example .env
+```
+
+**3. Apply database migrations:**
+```powershell
+# For local development
+wrangler d1 migrations apply pr_tracker --local
+
+# For production (remote database)
+wrangler d1 migrations apply pr_tracker --remote
+```
+
+**4. Run migrations via the helper script (use `.\` prefix for local script execution):**
+```powershell
+# Apply locally
+$env:MIGRATION_TARGET="local"; .\scripts\migration.sh
+
+# Apply to remote (default)
+.\scripts\migration.sh
+```
+
+> **Note:** The `migration.sh` script requires a bash-compatible shell such as [Git Bash](https://gitforwindows.org/) or [WSL](https://learn.microsoft.com/en-us/windows/wsl/install). If neither is available, run the `wrangler d1 migrations apply` commands directly as shown in step 3 above.
+
 ### Development
 
 Run the development server:
@@ -259,6 +293,10 @@ npm test
 
 ### Core Endpoints
 - `GET /` - Serves the HTML interface
+- `GET /api/auth/login` - Start GitHub OAuth sign-in
+- `GET /api/auth/callback` - GitHub OAuth callback (code exchange)
+- `GET /api/auth/user` - Returns current auth/session state
+- `POST /api/auth/logout` - Clears OAuth session cookies
 - `GET /api/repos` - List all repositories with open PRs
 - `GET /api/prs` - List all open PRs with pagination and sorting
   - Query parameters:
@@ -272,6 +310,7 @@ npm test
 - `POST /api/refresh` - Refresh a PR's data (body: `{"pr_id": 123}`)
   - Automatically removes PR if it has been merged or closed
 - `GET /api/rate-limit` - Check GitHub API rate limit status
+  - Includes token metadata: `token_source` and `oauth_authenticated`
 - `GET /api/status` - Check database configuration status
 
 ### Webhook Endpoints
@@ -485,9 +524,17 @@ Context-aware suggestions based on PR state:
 
 ## GitHub API
 
-The application uses the GitHub REST API to fetch PR information. No authentication is required for public repositories, but rate limits apply (60 requests per hour for unauthenticated requests).
+BLT-Leaf uses the GitHub REST + GraphQL APIs for PR data.
 
-For private repositories or higher rate limits, you can add a GitHub token to the worker environment variables.
+Authentication priority for API requests:
+1. User OAuth token from encrypted session cookie (`token_source: user_oauth`)
+2. `x-github-token` header (`token_source: header_token`) for API clients
+3. Shared worker fallback token `GITHUB_TOKEN` (`token_source: shared_token`)
+4. Unauthenticated requests (`token_source: unauthenticated`)
+
+No PAT prompt is required in the UI.
+
+For OAuth setup and troubleshooting, see `docs/OAUTH_SETUP.md`.
 
 ## Webhook Integration
 
