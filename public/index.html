@@ -1293,7 +1293,7 @@
                 el.textContent = '';
                 el.classList.add('hidden');
                 if (input) {
-                    input.setAttribute('aria-invalid', 'false');
+                    input.removeAttribute('aria-invalid');
                     input.removeAttribute('aria-describedby');
                 }
             }
@@ -3316,8 +3316,7 @@
                 return;
             }
 
-            const effectiveAddAll = addAll || parsedUrl.type !== 'pr';
-            if (!effectiveAddAll && parsedUrl.type !== 'pr') {
+            if (!addAll && parsedUrl.type !== 'pr') {
                 setUrlError('Use a pull request URL when bulk import is not enabled');
                 input.focus();
                 return;
@@ -3330,9 +3329,10 @@
 
             setUrlError('');
             const canonicalInputUrl = parsedUrl.canonicalUrl;
+            const isBulkImport = addAll || parsedUrl.type !== 'pr';
 
             btn.disabled = true;
-            btn.textContent = effectiveAddAll ? 'Importing...' : 'Adding...';
+            btn.textContent = isBulkImport ? 'Importing...' : 'Adding...';
 
             try {
                 // If importing all, handle logic to send repo_url appropriately
@@ -3344,7 +3344,7 @@
                     },
                     body: JSON.stringify({
                         pr_url: canonicalInputUrl,
-                        add_all: effectiveAddAll
+                        add_all: isBulkImport
                     })
                 });
 
@@ -3365,7 +3365,7 @@
                     }
                     invalidateApiCache();
                     // For single PR additions, select the org/repo and highlight the added PR
-                    if (!effectiveAddAll && parsedUrl.type === 'pr') {
+                    if (!isBulkImport && parsedUrl.type === 'pr') {
                         const targetOwner = parsedUrl.owner;
                         const targetRepo = parsedUrl.repo;
                         const targetPrNumber = parsedUrl.prNumber;

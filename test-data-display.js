@@ -51,6 +51,27 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForChildExit(child, timeoutMs = 800) {
+  if (!child) return true;
+  if (child.exitCode !== null) return true;
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('exit', onExit);
+      child.removeListener('close', onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(child.exitCode !== null), timeoutMs);
+    child.once('exit', onExit);
+    child.once('close', onExit);
+  });
+}
+
 function getSetCookieHeader(response) {
   if (response?.headers?.getSetCookie) {
     return response.headers.getSetCookie().join('\n');
@@ -100,8 +121,8 @@ async function terminateChildProcessTree(child) {
     return;
   }
 
-  await sleep(800);
-  if (!child.killed) {
+  const exited = await waitForChildExit(child, 800);
+  if (!exited && child.exitCode === null) {
     try {
       child.kill('SIGKILL');
     } catch (_) {

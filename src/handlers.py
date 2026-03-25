@@ -274,7 +274,7 @@ async def handle_add_pr(request, env):
             readiness_data = None
             try:
                 pr_result = await db.prepare(
-                    'SELECT * FROM prs WHERE repo_owner = ? AND repo_name = ? AND pr_number = ?'
+                    'SELECT * FROM prs WHERE repo_owner = ? COLLATE NOCASE AND repo_name = ? COLLATE NOCASE AND pr_number = ?'
                 ).bind(parsed['owner'], parsed['repo'], parsed['pr_number']).first()
                 if pr_result:
                     pr_row = pr_result.to_py()
@@ -1119,7 +1119,7 @@ async def handle_github_webhook(request, env):
             db = get_db(env)
             pr_url = f"https://github.com/{repo_owner}/{repo_name}/pull/{pr_number}"
             result = await db.prepare(
-                'SELECT id FROM prs WHERE repo_owner = ? AND repo_name = ? AND pr_number = ?'
+                'SELECT id FROM prs WHERE repo_owner = ? COLLATE NOCASE AND repo_name = ? COLLATE NOCASE AND pr_number = ?'
             ).bind(repo_owner, repo_name, pr_number).first()
             
             # Handle opened PRs - add to tracking automatically
@@ -1145,7 +1145,7 @@ async def handle_github_webhook(request, env):
                     
                     # Get the newly created PR ID
                     new_result = await db.prepare(
-                        'SELECT id FROM prs WHERE repo_owner = ? AND repo_name = ? AND pr_number = ?'
+                        'SELECT id FROM prs WHERE repo_owner = ? COLLATE NOCASE AND repo_name = ? COLLATE NOCASE AND pr_number = ?'
                     ).bind(repo_owner, repo_name, pr_number).first()
                     new_pr_id = new_result.to_py()['id'] if new_result else None
                     
@@ -1304,7 +1304,7 @@ async def handle_github_webhook(request, env):
             for pr_number, repo_owner, repo_name in prs_to_update:
                 pr_url = f"https://github.com/{repo_owner}/{repo_name}/pull/{pr_number}"
                 result = await db.prepare(
-                    'SELECT id FROM prs WHERE repo_owner = ? AND repo_name = ? AND pr_number = ?'
+                    'SELECT id FROM prs WHERE repo_owner = ? COLLATE NOCASE AND repo_name = ? COLLATE NOCASE AND pr_number = ?'
                 ).bind(repo_owner, repo_name, pr_number).first()
                 
                 if not result:

@@ -16,11 +16,11 @@ _GITHUB_PR_RE = re.compile(
     re.IGNORECASE,
 )
 _GITHUB_REPO_RE = re.compile(
-    r'^https?://github\.com/([^/?#\s]+)/([^/?#\s]+)/?(?:[?#].*)?$',
+    r'^https?://github\.com/(?!orgs(?:/|$))([^/?#\s]+)/([^/?#\s]+)/?(?:[?#].*)?$',
     re.IGNORECASE,
 )
 _GITHUB_ORG_RE = re.compile(
-    r'^https?://github\.com/([A-Za-z0-9_.-]+)/?(?:[?#].*)?$',
+    r'^https?://github\.com/(?:orgs/)?([A-Za-z0-9_.-]+)/?(?:[?#].*)?$',
     re.IGNORECASE,
 )
 
@@ -91,7 +91,7 @@ def parse_org_url(url):
         reserved = {'settings', 'organizations', 'explore', 'marketplace',
                     'notifications', 'new', 'login', 'signup', 'features',
                     'enterprise', 'pricing', 'topics', 'collections',
-                    'trending', 'sponsors', 'about', 'security', 'pulls',
+                    'trending', 'sponsors', 'about', 'security', 'pulls', 'orgs',
                     'issues', 'codespaces', 'discussions'}
         if owner.lower() in reserved:
             return None
