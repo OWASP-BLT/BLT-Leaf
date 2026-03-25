@@ -12,11 +12,11 @@ _CHANGES_REQUESTED_SCORE_MULTIPLIER = 0.5
 _MERGE_CONFLICTS_SCORE_MULTIPLIER = 0.67
 
 _GITHUB_PR_RE = re.compile(
-    r'^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)(?:[/?#].*)?$',
+    r'^https?://github\.com/([^/?#\s]+)/([^/?#\s]+)/pull/(\d+)(?:[/?#].*)?$',
     re.IGNORECASE,
 )
 _GITHUB_REPO_RE = re.compile(
-    r'^https?://github\.com/([^/]+)/([^/?#]+)/?(?:[?#].*)?$',
+    r'^https?://github\.com/([^/?#\s]+)/([^/?#\s]+)/?(?:[?#].*)?$',
     re.IGNORECASE,
 )
 _GITHUB_ORG_RE = re.compile(

@@ -25,7 +25,7 @@ function extractBlock(source, startToken, endToken) {
 
 const parserBlock = extractBlock(
   html,
-  'const PR_PATH_RE =',
+  'const PR_PATH_RE = /^\\/([^/]+)\\/([^/]+)\\/pull\\/(\\d+)\\/?$/i;',
   'function showSectionMessage('
 );
 

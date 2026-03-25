@@ -274,8 +274,8 @@ async def handle_add_pr(request, env):
             readiness_data = None
             try:
                 pr_result = await db.prepare(
-                    'SELECT * FROM prs WHERE pr_url = ?'
-                ).bind(canonical_pr_url).first()
+                    'SELECT * FROM prs WHERE repo_owner = ? AND repo_name = ? AND pr_number = ?'
+                ).bind(parsed['owner'], parsed['repo'], parsed['pr_number']).first()
                 if pr_result:
                     pr_row = pr_result.to_py()
                     readiness_data = await _run_readiness_analysis(env, pr_row, pr_row['id'], user_token)
@@ -1119,8 +1119,8 @@ async def handle_github_webhook(request, env):
             db = get_db(env)
             pr_url = f"https://github.com/{repo_owner}/{repo_name}/pull/{pr_number}"
             result = await db.prepare(
-                'SELECT id FROM prs WHERE pr_url = ?'
-            ).bind(pr_url).first()
+                'SELECT id FROM prs WHERE repo_owner = ? AND repo_name = ? AND pr_number = ?'
+            ).bind(repo_owner, repo_name, pr_number).first()
             
             # Handle opened PRs - add to tracking automatically
             if action == 'opened':
@@ -1145,8 +1145,8 @@ async def handle_github_webhook(request, env):
                     
                     # Get the newly created PR ID
                     new_result = await db.prepare(
-                        'SELECT id FROM prs WHERE pr_url = ?'
-                    ).bind(pr_url).first()
+                        'SELECT id FROM prs WHERE repo_owner = ? AND repo_name = ? AND pr_number = ?'
+                    ).bind(repo_owner, repo_name, pr_number).first()
                     new_pr_id = new_result.to_py()['id'] if new_result else None
                     
                     return Response.new(
@@ -1304,8 +1304,8 @@ async def handle_github_webhook(request, env):
             for pr_number, repo_owner, repo_name in prs_to_update:
                 pr_url = f"https://github.com/{repo_owner}/{repo_name}/pull/{pr_number}"
                 result = await db.prepare(
-                    'SELECT id FROM prs WHERE pr_url = ?'
-                ).bind(pr_url).first()
+                    'SELECT id FROM prs WHERE repo_owner = ? AND repo_name = ? AND pr_number = ?'
+                ).bind(repo_owner, repo_name, pr_number).first()
                 
                 if not result:
                     # PR not being tracked - skip it
