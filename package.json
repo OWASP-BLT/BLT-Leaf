@@ -11,8 +11,9 @@
     "db:migrations:list": "wrangler d1 migrations list pr_tracker",
     "lint": "echo 'Linting not configured yet' && exit 0",
     "format:check": "echo 'Format checking not configured yet' && exit 0",
-    "test": "node test-data-display.js",
-    "test:data-display": "node test-data-display.js"
+    "test": "node test-data-display.js && node test-url-validation.js",
+    "test:data-display": "node test-data-display.js",
+    "test:url-validation": "node test-url-validation.js"
   },
   "keywords": [
     "github",

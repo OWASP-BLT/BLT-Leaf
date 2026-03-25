@@ -568,7 +568,7 @@
                         Add PR
                     </button>
                 </div>
-                <span id="url-error" style="color: #ff4d4d; font-size: 0.85em; display: none; margin-top: 5px;"></span>
+                <span id="url-error" class="hidden text-sm text-red-700 dark:text-red-400"></span>
 
                 <div class="mt-2 flex items-center gap-2">
                     <input type="checkbox" id="addAllPrsCheckbox"
@@ -1318,6 +1318,116 @@ document.getElementById('addPrBtn').addEventListener('click', () => {
                 toast.classList.add('opacity-0', 'transition-opacity', 'duration-500');
                 setTimeout(() => toast.remove(), 500);
             }, FEEDBACK_DISMISS_DELAY);
+        }
+
+        const PR_PATH_RE = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/i;
+        const REPO_PATH_RE = /^\/([^/]+)\/([^/]+)\/?$/i;
+        const ORGS_PATH_RE = /^\/orgs\/([^/]+)\/?$/i;
+        const ORG_PATH_RE = /^\/([^/]+)\/?$/i;
+        const RESERVED_OWNER_NAMES = new Set([
+            'about', 'codespaces', 'collections', 'discussions', 'enterprise',
+            'explore', 'features', 'issues', 'login', 'marketplace', 'new',
+            'notifications', 'organizations', 'orgs', 'pricing', 'pulls',
+            'security', 'settings', 'signup', 'sponsors', 'topics', 'trending'
+        ]);
+
+        function setUrlError(message) {
+            const el = document.getElementById('url-error');
+            if (!el) return;
+            if (message) {
+                el.textContent = message;
+                el.classList.remove('hidden');
+            } else {
+                el.textContent = '';
+                el.classList.add('hidden');
+            }
+        }
+
+        function parseGitHubTrackingUrl(rawUrl) {
+            const value = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+            if (!value) {
+                return { valid: false, reason: 'Please enter a PR URL' };
+            }
+            if (value.length > 2048) {
+                return { valid: false, reason: 'URL is too long' };
+            }
+
+            let url;
+            try {
+                url = new URL(value);
+            } catch {
+                return { valid: false, reason: 'Please enter a valid URL' };
+            }
+
+            const protocol = url.protocol.toLowerCase();
+            if (protocol !== 'http:' && protocol !== 'https:') {
+                return { valid: false, reason: 'URL must start with http:// or https://' };
+            }
+
+            const hostname = url.hostname.toLowerCase();
+            if (hostname !== 'github.com' && hostname !== 'www.github.com') {
+                return { valid: false, reason: 'Only github.com URLs are allowed' };
+            }
+
+            const cleanPath = url.pathname.replace(/\/+$/, '') || '/';
+            let match = cleanPath.match(PR_PATH_RE);
+            if (match) {
+                const owner = match[1];
+                const repo = match[2];
+                const prNumber = parseInt(match[3], 10);
+                return {
+                    valid: true,
+                    type: 'pr',
+                    owner,
+                    repo,
+                    prNumber,
+                    canonicalUrl: `https://github.com/${owner}/${repo}/pull/${prNumber}`
+                };
+            }
+
+            match = cleanPath.match(REPO_PATH_RE);
+            if (match) {
+                const owner = match[1];
+                const repo = match[2];
+                if (owner.toLowerCase() !== 'orgs' && repo.toLowerCase() !== 'pull') {
+                    return {
+                        valid: true,
+                        type: 'repo',
+                        owner,
+                        repo,
+                        canonicalUrl: `https://github.com/${owner}/${repo}`
+                    };
+                }
+            }
+
+            match = cleanPath.match(ORGS_PATH_RE);
+            if (match) {
+                const owner = match[1];
+                return {
+                    valid: true,
+                    type: 'org',
+                    owner,
+                    canonicalUrl: `https://github.com/${owner}`
+                };
+            }
+
+            match = cleanPath.match(ORG_PATH_RE);
+            if (match) {
+                const owner = match[1];
+                if (!RESERVED_OWNER_NAMES.has(owner.toLowerCase())) {
+                    return {
+                        valid: true,
+                        type: 'org',
+                        owner,
+                        canonicalUrl: `https://github.com/${owner}`
+                    };
+                }
+            }
+
+            return {
+                valid: false,
+                reason: 'Use a GitHub PR, repository, or organization URL'
+            };
         }
 
         function showSectionMessage(message, type) {
@@ -3218,16 +3328,28 @@ document.getElementById('addPrBtn').addEventListener('click', () => {
             const checkbox = document.getElementById('addAllPrsCheckbox');
             const prUrl = input.value.trim();
             const addAll = checkbox.checked;
+            const parsedUrl = parseGitHubTrackingUrl(prUrl);
 
-            if (!prUrl) {
-                showInputError('prUrlInput', 'Please enter a PR URL');
+            if (!parsedUrl.valid) {
+                setUrlError(parsedUrl.reason);
+                input.focus();
                 return;
             }
 
-            // Auto-detect if URL is an org or repo URL (not a PR URL)
-            const isOrgOrRepoUrl = prUrl.match(/^https?:\/\/github\.com\/[^/]+\/?$/) || 
-                                   (prUrl.match(/^https?:\/\/github\.com\/[^/]+\/[^/]+\/?$/) && !prUrl.includes('/pull/'));
-            const effectiveAddAll = addAll || !!isOrgOrRepoUrl;
+            const effectiveAddAll = addAll || parsedUrl.type !== 'pr';
+            if (!effectiveAddAll && parsedUrl.type !== 'pr') {
+                setUrlError('Use a pull request URL when bulk import is not enabled');
+                input.focus();
+                return;
+            }
+            if (addAll && parsedUrl.type === 'pr') {
+                setUrlError('For bulk import, enter a repository or organization URL');
+                input.focus();
+                return;
+            }
+
+            setUrlError('');
+            const canonicalInputUrl = parsedUrl.canonicalUrl;
 
             btn.disabled = true;
             btn.textContent = effectiveAddAll ? 'Importing...' : 'Adding...';
@@ -3241,16 +3363,18 @@ document.getElementById('addPrBtn').addEventListener('click', () => {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        pr_url: prUrl,
-                        add_all: addAll
+                        pr_url: canonicalInputUrl,
+                        add_all: effectiveAddAll
                     })
                 });
 
                 const data = await response.json();
                 if (data.error) {
-                    showInputError('prUrlInput', data.error);
+                    setUrlError(data.error);
+                    input.focus();
                 } else {
                     input.value = '';
+                    setUrlError('');
                     // Show success message for bulk imports
                     if (data.imported_count !== undefined) {
                         if (data.truncated) {
@@ -3261,11 +3385,9 @@ document.getElementById('addPrBtn').addEventListener('click', () => {
                     }
                     invalidateApiCache();
                     // For single PR additions, select the org/repo and highlight the added PR
-                    const prUrlPattern = /^https?:\/\/github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)\/pull\/\d+/;
-                    const prMatch = !effectiveAddAll && prUrl.match(prUrlPattern);
-                    if (prMatch) {
-                        const prOwner = prMatch[1];
-                        const prRepoKey = `${prMatch[1]}/${prMatch[2]}`;
+                    if (!effectiveAddAll && parsedUrl.type === 'pr') {
+                        const prOwner = parsedUrl.owner;
+                        const prRepoKey = `${parsedUrl.owner}/${parsedUrl.repo}`;
                         // Update org filter to highlight the PR's owner/org
                         currentOrg = prOwner;
                         localStorage.setItem('currentOrg', currentOrg);
@@ -3281,7 +3403,7 @@ document.getElementById('addPrBtn').addEventListener('click', () => {
                         await loadPrs(true);
                         await loadRateLimit(true);
                         // Highlight the newly added PR row
-                        const added = allPrs.find(pr => pr.pr_url === prUrl);
+                        const added = allPrs.find(pr => pr.pr_url === canonicalInputUrl);
                         if (added) highlightPrRow(added.id);
                     } else {
                         // Force bypass service worker cache after import
@@ -3292,7 +3414,8 @@ document.getElementById('addPrBtn').addEventListener('click', () => {
                 }
             } catch (error) {
                 console.error('Error adding PR:', error);
-                showInputError('prUrlInput', 'Failed to add PR');
+                setUrlError('Failed to add PR');
+                input.focus();
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Add PR';
@@ -3393,6 +3516,9 @@ document.getElementById('addPrBtn').addEventListener('click', () => {
         });
 
         document.getElementById('addPrBtn').addEventListener('click', addPr);
+        document.getElementById('prUrlInput').addEventListener('input', () => {
+            setUrlError('');
+        });
         document.getElementById('prUrlInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') addPr();
         });

@@ -1,7 +1,6 @@
 """Utility functions for PR parsing and analysis"""
 
 import re
-import json
 from datetime import datetime, timezone
 
 # Score multiplier when changes are requested
@@ -12,29 +11,34 @@ _CHANGES_REQUESTED_SCORE_MULTIPLIER = 0.5
 # Reduces overall readiness score by 33% when mergeable state is 'dirty' (conflicts)
 _MERGE_CONFLICTS_SCORE_MULTIPLIER = 0.67
 
-
-# 1. Place this regex at the top of the file (outside the function)
 _GITHUB_PR_RE = re.compile(
-    r'^https://github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)/pull/(\d+)(/.*)?$'
+    r'^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)(?:[/?#].*)?$',
+    re.IGNORECASE,
+)
+_GITHUB_REPO_RE = re.compile(
+    r'^https?://github\.com/([^/]+)/([^/?#]+)/?(?:[?#].*)?$',
+    re.IGNORECASE,
+)
+_GITHUB_ORG_RE = re.compile(
+    r'^https?://github\.com/([A-Za-z0-9_.-]+)/?(?:[?#].*)?$',
+    re.IGNORECASE,
 )
 
-# 2. Replace the old parse_pr_url with this one
+
 def parse_pr_url(pr_url: str):
     """
     Validates and parses a GitHub PR URL.
     Returns a dict with owner, repo, and pr_number or raises ValueError.
     """
-    # Type and presence validation
-    if not pr_url or not isinstance(pr_url, str):
-        raise ValueError("PR URL is required and must be a string.")
+    if not isinstance(pr_url, str):
+        raise ValueError("PR URL must be a string")
+    
+    if not pr_url:
+        raise ValueError("PR URL is required")
+    
+    normalized_url = pr_url.strip()
+    match = _GITHUB_PR_RE.match(normalized_url)
 
-    raw_url = pr_url.strip()
-
-    # Security: Prevent ReDoS or overflow attacks with length limit
-    if len(raw_url) > 300:
-        raise ValueError("URL is too long.")
-
-    match = _GITHUB_PR_RE.match(raw_url)
     if not match:
         raise ValueError(
             "Invalid GitHub PR URL. Expected format: "
@@ -51,20 +55,25 @@ def parse_pr_url(pr_url: str):
     return {
         'owner': owner,
         'repo': repo,
-        'pr_number': pr_number
+        'pr_number': pr_number,
+        'canonical_url': f"https://github.com/{owner}/{repo}/pull/{pr_number}"
     }
 
 
 def parse_repo_url(url):
     """Parse GitHub Repo URL to extract owner and repo name"""
     if not url: return None
-    url = url.strip().rstrip('/')
-    pattern = r'https?://github\.com/([^/]+)/([^/]+)(?:/.*)?$'
-    match = re.match(pattern, url)
+    normalized_url = url.strip()
+    match = _GITHUB_REPO_RE.match(normalized_url)
     if match:
+        owner = match.group(1)
+        repo = match.group(2)
+        if repo.lower() == 'pull':
+            return None
         return {
-            'owner': match.group(1),
-            'repo': match.group(2)
+            'owner': owner,
+            'repo': repo,
+            'canonical_url': f"https://github.com/{owner}/{repo}"
         }
     return None
 
@@ -75,10 +84,8 @@ def parse_org_url(url):
     """
     if not url:
         return None
-    url = url.strip().rstrip('/')
-    # Match org/user URL: github.com/<owner> with no further path segments
-    pattern = r'^https?://github\.com/([A-Za-z0-9_.-]+)$'
-    match = re.match(pattern, url)
+    normalized_url = url.strip()
+    match = _GITHUB_ORG_RE.match(normalized_url)
     if match:
         owner = match.group(1)
         # Exclude GitHub reserved paths that aren't orgs/users
@@ -89,7 +96,10 @@ def parse_org_url(url):
                     'issues', 'codespaces', 'discussions'}
         if owner.lower() in reserved:
             return None
-        return {'owner': owner}
+        return {
+            'owner': owner,
+            'canonical_url': f"https://github.com/{owner}"
+        }
     return None
 
 
