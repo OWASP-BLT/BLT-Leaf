@@ -92,7 +92,12 @@ async function startRuntimeServer() {
   let child;
   if (process.platform === 'win32') {
     // Spawning npx.cmd directly can fail with EINVAL on some Windows/Node setups.
-    const cmdLine = ['npx', ...wranglerArgs].join(' ');
+    const quoteForCmd = (arg) => {
+      const value = String(arg);
+      const escaped = value.replace(/"/g, '""');
+      return /[\s"&|<>^()%!]/.test(value) ? `"${escaped}"` : escaped;
+    };
+    const cmdLine = ['npx', ...wranglerArgs].map(quoteForCmd).join(' ');
     child = spawn('cmd.exe', ['/d', '/s', '/c', cmdLine], {
       cwd: __dirname,
       env: { ...process.env, BROWSER: 'none' },

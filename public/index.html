@@ -1299,6 +1299,30 @@
             }
         }
 
+        function normalizeRepoKey(owner, repo) {
+            return `${String(owner || '').toLowerCase()}/${String(repo || '').toLowerCase()}`;
+        }
+
+        function findRepoByIdentity(owner, repo) {
+            const targetKey = normalizeRepoKey(owner, repo);
+            return repos.find(r => normalizeRepoKey(r.repo_owner, r.repo_name) === targetKey) || null;
+        }
+
+        function findPrByIdentity(owner, repo, prNumber) {
+            const targetKey = normalizeRepoKey(owner, repo);
+            const targetPrNumber = String(prNumber || '');
+            return allPrs.find(pr => {
+                const prKey = normalizeRepoKey(pr.repo_owner, pr.repo_name);
+                if (prKey !== targetKey) {
+                    return false;
+                }
+                if (!targetPrNumber) {
+                    return true;
+                }
+                return String(pr.pr_number || '') === targetPrNumber;
+            }) || null;
+        }
+
         function parseGitHubTrackingUrl(rawUrl) {
             const value = typeof rawUrl === 'string' ? rawUrl.trim() : '';
             if (!value) {
@@ -3342,24 +3366,34 @@
                     invalidateApiCache();
                     // For single PR additions, select the org/repo and highlight the added PR
                     if (!effectiveAddAll && parsedUrl.type === 'pr') {
-                        const prOwner = parsedUrl.owner;
-                        const prRepoKey = `${parsedUrl.owner}/${parsedUrl.repo}`;
-                        // Update org filter to highlight the PR's owner/org
-                        currentOrg = prOwner;
+                        const targetOwner = parsedUrl.owner;
+                        const targetRepo = parsedUrl.repo;
+                        const targetPrNumber = parsedUrl.prNumber;
+
+                        // Reset to owner scope first, then resolve exact casing/key from loaded repo list.
+                        currentOrg = targetOwner;
+                        currentPage = 1;
+                        await loadRepos(true);
+
+                        const matchedRepo = findRepoByIdentity(targetOwner, targetRepo);
+                        const resolvedOwner = matchedRepo ? matchedRepo.repo_owner : targetOwner;
+                        const resolvedRepo = matchedRepo ? matchedRepo.repo_name : targetRepo;
+
+                        currentOrg = resolvedOwner;
                         localStorage.setItem('currentOrg', currentOrg);
                         const orgFilterInput = document.getElementById('orgFilterInput');
                         const orgFilterClearBtn = document.getElementById('orgFilterClearBtn');
-                        if (orgFilterInput) orgFilterInput.value = prOwner;
+                        if (orgFilterInput) orgFilterInput.value = currentOrg;
                         if (orgFilterClearBtn) orgFilterClearBtn.classList.remove('hidden');
-                        // Select the specific repo in the sidebar
-                        currentRepo = prRepoKey;
+
+                        currentRepo = `${resolvedOwner}/${resolvedRepo}`;
                         localStorage.setItem('currentRepo', currentRepo);
-                        currentPage = 1;
-                        await loadRepos(true);
+
                         await loadPrs(true);
                         await loadRateLimit(true);
+
                         // Highlight the newly added PR row
-                        const added = allPrs.find(pr => pr.pr_url === canonicalInputUrl);
+                        const added = findPrByIdentity(targetOwner, targetRepo, targetPrNumber);
                         if (added) highlightPrRow(added.id);
                     } else {
                         // Force bypass service worker cache after import
@@ -3785,14 +3819,14 @@
             if (ownerValid && repoValid && prValid) {
                 // New format: construct the full PR URL from parts
                 prUrl = `https://github.com/${ownerParam}/${repoParam}/pull/${prParam}`;
-                repoKey = `${ownerParam}/${repoParam}`;
+                repoKey = normalizeRepoKey(ownerParam, repoParam);
             } else if (prParam) {
                 // Old format: only accept prParam if it looks like a GitHub PR URL
                 const legacyPrUrlPattern = /^https?:\/\/github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)\/pull\/\d+$/;
                 const match = prParam.match(legacyPrUrlPattern);
                 if (match) {
                     prUrl = prParam;
-                    repoKey = `${match[1]}/${match[2]}`;
+                    repoKey = normalizeRepoKey(match[1], match[2]);
                 }
             }
 
@@ -3807,24 +3841,28 @@
             if (input) input.value = canonicalInputUrl;
 
             // Select the correct repo in the sidebar if needed
-            if (repoKey && repoKey !== currentRepo) {
-                currentRepo = repoKey;
+            const matchedRepo = findRepoByIdentity(parsedParamUrl.owner, parsedParamUrl.repo);
+            const resolvedOwner = matchedRepo ? matchedRepo.repo_owner : parsedParamUrl.owner;
+            const resolvedRepo = matchedRepo ? matchedRepo.repo_name : parsedParamUrl.repo;
+            const resolvedRepoKey = `${resolvedOwner}/${resolvedRepo}`;
+            if (repoKey && normalizeRepoKey(...currentRepo.split('/')) !== normalizeRepoKey(resolvedOwner, resolvedRepo)) {
+                currentRepo = resolvedRepoKey;
                 localStorage.setItem('currentRepo', currentRepo);
                 updateMobileRepoDisplay();
                 document.querySelectorAll('.repo-item').forEach(item => {
-                    setRepoItemActiveState(item, item.dataset.repo === currentRepo);
+                    setRepoItemActiveState(item, normalizeRepoKey(...item.dataset.repo.split('/')) === normalizeRepoKey(resolvedOwner, resolvedRepo));
                 });
                 await loadPrs();
             }
 
             // Check if the PR is already tracked
-            const existing = allPrs.find(pr => pr.pr_url === canonicalInputUrl);
+            const existing = findPrByIdentity(parsedParamUrl.owner, parsedParamUrl.repo, parsedParamUrl.prNumber);
             if (existing) {
                 highlightPrRow(existing.id);
             } else {
                 // Auto-add the PR, then highlight it
                 await addPr();
-                const added = allPrs.find(pr => pr.pr_url === canonicalInputUrl);
+                const added = findPrByIdentity(parsedParamUrl.owner, parsedParamUrl.repo, parsedParamUrl.prNumber);
                 if (added) highlightPrRow(added.id);
             }
         }
