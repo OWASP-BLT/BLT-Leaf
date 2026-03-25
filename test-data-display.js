@@ -74,6 +74,42 @@ async function waitForEndpoint(url, timeoutMs = 25000) {
   return false;
 }
 
+async function terminateChildProcessTree(child) {
+  if (!child) return;
+
+  if (process.platform === 'win32' && child.pid) {
+    // Ensure cmd.exe wrapper and all descendant processes (wrangler, etc.) are terminated.
+    const result = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+
+    if (result.status !== 0) {
+      try {
+        child.kill('SIGTERM');
+      } catch (_) {
+        // Ignore cleanup failures while shutting down test runtime processes.
+      }
+    }
+    return;
+  }
+
+  try {
+    child.kill('SIGTERM');
+  } catch (_) {
+    return;
+  }
+
+  await sleep(800);
+  if (!child.killed) {
+    try {
+      child.kill('SIGKILL');
+    } catch (_) {
+      // Ignore cleanup failures while shutting down test runtime processes.
+    }
+  }
+}
+
 async function startRuntimeServer() {
   const port = 8788;
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -122,7 +158,7 @@ async function startRuntimeServer() {
 
   const ready = await waitForEndpoint(`${baseUrl}/api/auth/user`);
   if (!ready) {
-    child.kill('SIGTERM');
+    await terminateChildProcessTree(child);
     throw new Error(`wrangler dev did not become ready within timeout. Output:\n${output}`);
   }
 
@@ -130,12 +166,8 @@ async function startRuntimeServer() {
 }
 
 async function stopRuntimeServer(runtime) {
-  if (!runtime || !runtime.child || runtime.child.killed) return;
-  runtime.child.kill('SIGTERM');
-  await sleep(800);
-  if (!runtime.child.killed) {
-    runtime.child.kill('SIGKILL');
-  }
+  if (!runtime || !runtime.child) return;
+  await terminateChildProcessTree(runtime.child);
 }
 
 // Test 1: Verify HTML file exists and contains required elements
