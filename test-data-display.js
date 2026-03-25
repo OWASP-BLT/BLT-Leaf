@@ -20,16 +20,26 @@ const colors = {
 
 let testsPassed = 0;
 let testsFailed = 0;
+let testsSkipped = 0;
 
 function log(message, color = colors.reset) {
   console.log(`${color}${message}${colors.reset}`);
 }
 
-function testResult(testName, passed, message = '') {
-  if (passed) {
+function testResult(testName, statusOrPassed, message = '') {
+  const isExplicitStatus = statusOrPassed === 'passed' || statusOrPassed === 'failed' || statusOrPassed === 'skipped';
+  const status = isExplicitStatus
+    ? statusOrPassed
+    : (statusOrPassed ? 'passed' : 'failed');
+
+  if (status === 'passed') {
     testsPassed++;
     log(`✓ ${testName}`, colors.green);
     if (message) log(`  ${message}`, colors.blue);
+  } else if (status === 'skipped') {
+    testsSkipped++;
+    log(`- ${testName} (skipped)`, colors.yellow);
+    if (message) log(`  ${message}`, colors.yellow);
   } else {
     testsFailed++;
     log(`✗ ${testName}`, colors.red);
@@ -713,7 +723,7 @@ async function testAuthenticationRuntimeBehavior() {
     );
   } catch (error) {
     if (String(error.message || '').includes('SKIP_RUNTIME_AUTH_TEST:')) {
-      testResult('Authentication runtime behavior test setup', true, `Skipped: ${error.message}`);
+      testResult('Authentication runtime behavior test setup', 'skipped', `Skipped: ${error.message}`);
     } else {
       testResult('Authentication runtime behavior test setup', false, error.message);
     }
@@ -742,12 +752,14 @@ async function runTests() {
   log('  Test Summary', colors.blue);
   log('='.repeat(60), colors.blue);
 
-  const total = testsPassed + testsFailed;
+  const total = testsPassed + testsFailed + testsSkipped;
+  const executed = testsPassed + testsFailed;
   log(`\nTotal Tests: ${total}`);
   log(`Passed: ${testsPassed}`, colors.green);
+  log(`Skipped: ${testsSkipped}`, colors.yellow);
   log(`Failed: ${testsFailed}`, testsFailed > 0 ? colors.red : colors.green);
 
-  const successRate = total > 0 ? ((testsPassed / total) * 100).toFixed(1) : 0;
+  const successRate = executed > 0 ? ((testsPassed / executed) * 100).toFixed(1) : 100;
   log(`\nSuccess Rate: ${successRate}%\n`, successRate >= 90 ? colors.green : colors.yellow);
 
   // Exit with appropriate code

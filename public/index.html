@@ -568,7 +568,7 @@
                         Add PR
                     </button>
                 </div>
-                <span id="url-error" class="hidden text-sm text-red-700 dark:text-red-400"></span>
+                <span id="url-error" class="hidden text-sm text-red-700 dark:text-red-400" role="status" aria-live="polite"></span>
 
                 <div class="mt-2 flex items-center gap-2">
                     <input type="checkbox" id="addAllPrsCheckbox"
@@ -1280,20 +1280,29 @@
 
         function setUrlError(message) {
             const el = document.getElementById('url-error');
+            const input = document.getElementById('prUrlInput');
             if (!el) return;
             if (message) {
                 el.textContent = message;
                 el.classList.remove('hidden');
+                if (input) {
+                    input.setAttribute('aria-invalid', 'true');
+                    input.setAttribute('aria-describedby', 'url-error');
+                }
             } else {
                 el.textContent = '';
                 el.classList.add('hidden');
+                if (input) {
+                    input.setAttribute('aria-invalid', 'false');
+                    input.removeAttribute('aria-describedby');
+                }
             }
         }
 
         function parseGitHubTrackingUrl(rawUrl) {
             const value = typeof rawUrl === 'string' ? rawUrl.trim() : '';
             if (!value) {
-                return { valid: false, reason: 'Please enter a PR URL' };
+                return { valid: false, reason: 'Please enter a PR, repository, or organization URL' };
             }
             if (value.length > 2048) {
                 return { valid: false, reason: 'URL is too long' };
@@ -1336,7 +1345,7 @@
             if (match) {
                 const owner = match[1];
                 const repo = match[2];
-                if (owner.toLowerCase() !== 'orgs' && repo.toLowerCase() !== 'pull') {
+                if (!RESERVED_OWNER_NAMES.has(owner.toLowerCase()) && repo && repo.trim()) {
                     return {
                         valid: true,
                         type: 'repo',
@@ -3789,9 +3798,13 @@
 
             if (!prUrl) return;
 
+            const parsedParamUrl = parseGitHubTrackingUrl(prUrl);
+            if (!parsedParamUrl.valid || parsedParamUrl.type !== 'pr') return;
+            const canonicalInputUrl = parsedParamUrl.canonicalUrl;
+
             // Pre-fill the input with the PR URL
             const input = document.getElementById('prUrlInput');
-            if (input) input.value = prUrl;
+            if (input) input.value = canonicalInputUrl;
 
             // Select the correct repo in the sidebar if needed
             if (repoKey && repoKey !== currentRepo) {
@@ -3805,13 +3818,13 @@
             }
 
             // Check if the PR is already tracked
-            const existing = allPrs.find(pr => pr.pr_url === prUrl);
+            const existing = allPrs.find(pr => pr.pr_url === canonicalInputUrl);
             if (existing) {
                 highlightPrRow(existing.id);
             } else {
                 // Auto-add the PR, then highlight it
                 await addPr();
-                const added = allPrs.find(pr => pr.pr_url === prUrl);
+                const added = allPrs.find(pr => pr.pr_url === canonicalInputUrl);
                 if (added) highlightPrRow(added.id);
             }
         }

@@ -62,14 +62,13 @@ def parse_pr_url(pr_url: str):
 
 def parse_repo_url(url):
     """Parse GitHub Repo URL to extract owner and repo name"""
-    if not url: return None
+    if not url:
+        return None
     normalized_url = url.strip()
     match = _GITHUB_REPO_RE.match(normalized_url)
     if match:
         owner = match.group(1)
         repo = match.group(2)
-        if repo.lower() == 'pull':
-            return None
         return {
             'owner': owner,
             'repo': repo,

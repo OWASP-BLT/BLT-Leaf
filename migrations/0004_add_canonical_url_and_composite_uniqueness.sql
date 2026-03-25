@@ -12,12 +12,23 @@ UPDATE prs
 SET canonical_url = 'https://github.com/' || repo_owner || '/' || repo_name || '/pull/' || pr_number
 WHERE canonical_url IS NULL OR canonical_url = '';
 
-DELETE FROM prs
-WHERE id NOT IN (
-    SELECT MAX(id)
+WITH ranked_prs AS (
+    SELECT
+        id,
+        ROW_NUMBER() OVER (
+            PARTITION BY LOWER(repo_owner), LOWER(repo_name), pr_number
+            ORDER BY readiness_computed_at DESC NULLS LAST,
+                     updated_at DESC NULLS LAST,
+                     id DESC
+        ) AS row_num
     FROM prs
-    GROUP BY repo_owner, repo_name, pr_number
+)
+DELETE FROM prs
+WHERE id IN (
+    SELECT id
+    FROM ranked_prs
+    WHERE row_num > 1
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_prs_identity_unique
-ON prs(repo_owner, repo_name, pr_number);
+ON prs(repo_owner COLLATE NOCASE, repo_name COLLATE NOCASE, pr_number);
