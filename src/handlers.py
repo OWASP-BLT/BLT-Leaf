@@ -99,6 +99,7 @@ async def handle_add_pr(request, env):
                     if 'status=403' in error_msg:
                         return Response.new(json.dumps({'error': 'Rate Limit Exceeded'}), 
                                           {'status': 403, 'headers': {'Content-Type': 'application/json'}})
+                    print(f"Failed to fetch org repos for {org_owner}: {error_msg}")
                     return Response.new(json.dumps({'error': 'Failed to fetch organization repos'}), 
                                       {'status': 400, 'headers': {'Content-Type': 'application/json'}})
                 
@@ -210,7 +211,7 @@ async def handle_add_pr(request, env):
             try:
                 parsed = parse_pr_url(pr_url)
             except ValueError as e:
-                print(f"Invalid PR URL from client: {str(e)}")
+                print(f"Invalid PR URL from client: {e}")
                 return Response.new(
                     json.dumps({'error': 'Invalid PR URL'}),
                     {'status': 400, 'headers': {'Content-Type': 'application/json'}}
@@ -737,6 +738,7 @@ async def handle_refresh_org(request, env):
             if 'status=403' in error_msg:
                 return Response.new(json.dumps({'error': 'Rate Limit Exceeded'}),
                                   {'status': 403, 'headers': {'Content-Type': 'application/json'}})
+            print(f"Failed to fetch org repos for {org}: {error_msg}")
             return Response.new(json.dumps({'error': 'Failed to fetch organization repos'}),
                               {'status': 400, 'headers': {'Content-Type': 'application/json'}})
 
