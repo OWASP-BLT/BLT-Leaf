@@ -68,6 +68,11 @@ def parse_repo_url(url):
     match = _GITHUB_REPO_RE.match(normalized_url)
     if match:
         owner = match.group(1)
+        # Security guard: don't misroute /orgs/<owner> bulk URLs to parse_repo_url()
+        # GitHub uses /orgs/<owner> for organization homepages/dashboards.
+        if owner.lower() == 'orgs':
+            return None
+            
         repo = match.group(2)
         return {
             'owner': owner,

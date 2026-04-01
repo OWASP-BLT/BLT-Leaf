@@ -3316,6 +3316,7 @@
                 return;
             }
 
+            // Enforce compatibility between import mode (single vs bulk) and URL type
             if (!addAll && parsedUrl.type !== 'pr') {
                 setUrlError('Use a pull request URL when bulk import is not enabled');
                 input.focus();

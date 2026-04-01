@@ -219,7 +219,8 @@ async def handle_add_pr(request, env):
                         'reviewers_json': '[]'
                     }
 
-                    await upsert_pr(db, item['html_url'], owner, repo, item['number'], pr_data)
+                    canonical_pr_url = f"https://github.com/{owner}/{repo}/pull/{item['number']}"
+                    await upsert_pr(db, canonical_pr_url, owner, repo, item['number'], pr_data)
                     added_count += 1
             
             # Build response message
