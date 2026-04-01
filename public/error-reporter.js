@@ -4,16 +4,17 @@
     function safeTruncate(text, maxLen) {
         var str = String(text || '');
         if (str.length <= maxLen) return str;
-        return str.slice(0, Math.max(0, maxLen - 1)) + '…';
+        if (maxLen <= 3) return str.slice(0, Math.max(0, maxLen));
+        return str.slice(0, maxLen - 3) + '...';
     }
 
     function redactSensitive(text) {
         var str = String(text || '');
-        // Redact obvious key/value secrets and auth-like tokens.
-        str = str.replace(/(authorization|token|apikey|api[_-]?key|password|passwd|cookie|set-cookie|session|secret|bearer)\s*[:=]\s*([^\s,;]+)/gi, '$1:[redacted]');
-        // Redact email addresses.
+        str = str.replace(
+            /(authorization|token|apikey|api[_-]?key|password|passwd|cookie|set-cookie|session|secret|bearer)\s*[:=]\s*([^\s,;]+)/gi,
+            '$1:[redacted]'
+        );
         str = str.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]');
-        // Redact long token-like strings.
         str = str.replace(/\b[A-Za-z0-9_\-]{24,}\b/g, '[redacted-token]');
         return str;
     }
@@ -36,7 +37,6 @@
                 clean[key] = sanitizeText(value, 500);
                 return;
             }
-            // Avoid serializing arbitrary objects into error telemetry.
             clean[key] = '[redacted-object]';
         });
 
@@ -51,11 +51,24 @@
         }
     }
 
+    function serializeConsoleArg(value) {
+        if (value instanceof Error) {
+            return value.name + ': ' + value.message + '\n' + (value.stack || '');
+        }
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value);
+            } catch (e) {
+                return '[object]';
+            }
+        }
+        return String(value);
+    }
+
     function sendPayload(payload) {
         try {
             var body = JSON.stringify(payload);
 
-            // Prefer sendBeacon (good for unload), fallback to fetch if beacon fails.
             var ok = false;
             try {
                 ok = navigator.sendBeacon('/api/client-error', body);
@@ -69,9 +82,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: body,
                     keepalive: true,
-                }).catch(function () { });
+                }).catch(function () {});
             }
-        } catch (e) { /* ignore reporting failures */ }
+        } catch (e) {}
     }
 
     function reportError(errorType, message, stack, extra) {
@@ -86,62 +99,67 @@
         sendPayload(payload);
     }
 
-    // 1) Catch runtime errors + resource loading errors (capture=true is important for resources)
-    window.addEventListener('error', function (event) {
-        // Resource errors (script/img/link) often have event.target and no event.error
-        var target = event.target || {};
-        var resourceUrl = target.src || target.href;
+    window.addEventListener(
+        'error',
+        function (event) {
+            var target = event.target || {};
+            var resourceUrl = target.src || target.href;
+            var shouldReportResource =
+                target.tagName === 'SCRIPT' ||
+                target.tagName === 'LINK' ||
+                (target.tagName === 'IMG' &&
+                    !target.hasAttribute('onerror') &&
+                    !target.hasAttribute('data-ignore-error'));
 
-        var shouldReportResource =
-            target.tagName === 'SCRIPT' ||
-            target.tagName === 'LINK' ||
-            (target.tagName === 'IMG' && !target.hasAttribute('onerror') && !target.hasAttribute('data-ignore-error'));
+            if (resourceUrl && shouldReportResource) {
+                reportError(
+                    'ResourceError',
+                    'Failed to load or execute resource',
+                    (event.error && event.error.stack) || '',
+                    { url: getPageUrl(), resource: resourceUrl }
+                );
+                return;
+            }
 
-        if (resourceUrl && shouldReportResource) {
             reportError(
-                'ResourceError',
-                'Failed to load or execute resource',
+                (event.error && event.error.name) || 'Error',
+                event.message ||
+                    (event.error && event.error.message) ||
+                    String(event.error) ||
+                    'Unknown error',
                 (event.error && event.error.stack) || '',
-                { url: getPageUrl(), resource: resourceUrl }
+                { url: getPageUrl(), line: event.lineno, col: event.colno }
             );
-            return;
-        }
+        },
+        true
+    );
 
-        // Normal runtime error (ReferenceError/TypeError/etc.)
-        reportError(
-            (event.error && event.error.name) || 'Error',
-            event.message || (event.error && event.error.message) || String(event.error) || 'Unknown error',
-            (event.error && event.error.stack) || '',
-            { url: getPageUrl(), line: event.lineno, col: event.colno }
-        );
-    }, true);
-
-    // 2) Catch unhandled promise rejections
     window.addEventListener('unhandledrejection', function (event) {
         var reason = event.reason || {};
         reportError(
-            (reason.name) || 'UnhandledRejection',
+            reason.name || 'UnhandledRejection',
             reason.message || String(reason),
             reason.stack || '',
             { url: getPageUrl() }
         );
     });
 
-    // 3) Forward handled errors that are logged via console.error
-    // This helps when "real errors" are caught by try/catch and only logged.
     (function hookConsoleError() {
         var original = console.error;
         console.error = function () {
             try {
                 var args = Array.prototype.slice.call(arguments);
-                var errors = args.filter(function (a) { return a instanceof Error; });
+                var errors = args.filter(function (arg) {
+                    return arg instanceof Error;
+                });
+                var msg = args.map(serializeConsoleArg).join(' ');
 
                 if (errors.length > 0) {
                     var primary = errors[0];
                     reportError(
                         primary.name || 'ConsoleError',
                         (primary.name || 'ConsoleError') + ': ' + (primary.message || ''),
-                        primary.stack || '',
+                        primary.stack || msg,
                         {
                             url: getPageUrl(),
                             source: 'console.error:unhandled',
@@ -149,8 +167,13 @@
                             error_count: String(errors.length),
                         }
                     );
+                } else if (msg) {
+                    reportError('ConsoleError', msg, msg, {
+                        url: getPageUrl(),
+                        source: 'console.error',
+                    });
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) {}
 
             return original.apply(console, arguments);
         };
