@@ -18,7 +18,7 @@ from cache import (
     _READINESS_CACHE_TTL, _RATE_LIMIT_CACHE_TTL, _READINESS_RATE_LIMIT,
     _READINESS_RATE_WINDOW, _rate_limit_cache
 )
-from database import get_db, upsert_pr
+from database import get_db, upsert_pr, get_all_flakiness_scores
 from github_api import (
     fetch_pr_data, fetch_pr_timeline_data, fetch_paginated_data,
     verify_github_signature, fetch_multiple_prs_batch, fetch_org_repos
@@ -1640,8 +1640,14 @@ async def _run_readiness_analysis(env, pr, pr_id, github_token):
         # Classify review health
         review_classification, review_score = classify_review_health(review_data)
         
+        # Load flakiness scores from D1 (graceful fallback on missing table)
+        flakiness_scores = await get_all_flakiness_scores(get_db(env))
+
         # Calculate combined readiness
-        readiness = calculate_pr_readiness(pr, review_classification, review_score)
+        readiness = calculate_pr_readiness(
+            pr, review_classification, review_score,
+            flakiness_scores=flakiness_scores,
+        )
         
         # Build response data with percentage formatting
         response_data = {
