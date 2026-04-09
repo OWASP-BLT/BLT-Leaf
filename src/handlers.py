@@ -34,6 +34,10 @@ ISSUES_COUNT_SQL_EXPR = '(COALESCE(json_array_length(blockers), 0) + COALESCE(js
 # Maximum PRs to import/discover per bulk operation to prevent timeouts on large orgs
 _MAX_PRS_PER_BULK_OP = 1000
 
+# Page size for the lightweight /api/prs/updates endpoint.
+# Keeps each D1 query well within the storage-operation timeout limit.
+_PR_UPDATES_PAGE_SIZE = 500
+
 
 def _is_caller_scoped_token(token_info):
     """Return True when the request uses a caller-provided token."""
@@ -960,38 +964,58 @@ async def handle_status(env):
             }
         }), {'headers': {'Content-Type': 'application/json'}})
 
-async def handle_pr_updates_check(env):
+async def handle_pr_updates_check(env, after_id=None):
     """
-    GET /api/prs/updates
+    GET /api/prs/updates[?after_id=<int>]
     Lightweight endpoint to check for PR updates.
     Returns only PR IDs and their updated_at timestamps for change detection.
-    
+
+    Results are paginated using cursor-based pagination (after_id) to keep
+    each D1 query within the storage-operation timeout limit.  When the
+    response includes ``"has_more": true`` the caller should repeat the
+    request with ``after_id`` set to the last id in the returned list.
+
     This allows the frontend to poll efficiently without fetching full PR data.
     """
     try:
         db = get_db(env)
-        
-        # Fetch only IDs and timestamps - minimal data transfer
-        stmt = db.prepare('SELECT id, updated_at FROM prs ORDER BY id')
+
+        # Cursor-based pagination: fetch the next page starting after after_id.
+        # We request one extra row (LIMIT + 1) so we can reliably detect whether
+        # another page exists without a separate COUNT query.
+        fetch_limit = _PR_UPDATES_PAGE_SIZE + 1
+        if after_id is not None:
+            stmt = db.prepare(
+                'SELECT id, updated_at FROM prs WHERE id > ? ORDER BY id LIMIT ?'
+            ).bind(after_id, fetch_limit)
+        else:
+            stmt = db.prepare(
+                'SELECT id, updated_at FROM prs ORDER BY id LIMIT ?'
+            ).bind(fetch_limit)
+
         result = await stmt.all()
-        
+
         if not result or not result.results:
             return Response.new(
-                json.dumps({'updates': []}),
+                json.dumps({'updates': [], 'has_more': False}),
                 {'headers': {'Content-Type': 'application/json'}}
             )
-        
-        # Convert to lightweight format
+
+        # Convert to lightweight format; trim to the real page size
+        rows = list(result.results)
+        has_more = len(rows) > _PR_UPDATES_PAGE_SIZE
+        rows = rows[:_PR_UPDATES_PAGE_SIZE]
+
         updates = []
-        for row in result.results:
+        for row in rows:
             row_dict = row.to_py()
             updates.append({
                 'id': row_dict.get('id'),
                 'updated_at': row_dict.get('updated_at')
             })
-        
+
         return Response.new(
-            json.dumps({'updates': updates}),
+            json.dumps({'updates': updates, 'has_more': has_more}),
             {'headers': {'Content-Type': 'application/json'}}
         )
     except Exception as e:
