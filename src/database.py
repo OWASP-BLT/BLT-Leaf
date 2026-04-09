@@ -261,14 +261,17 @@ async def delete_readiness_from_db(env, pr_id):
 async def upsert_pr(db, pr_url, owner, repo, pr_number, pr_data):
     """Helper to insert or update PR in database (Deduplicates logic)"""
     current_timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    canonical_url = f'https://github.com/{owner}/{repo}/pull/{pr_number}'
     
     stmt = db.prepare('''
-        INSERT INTO prs (pr_url, repo_owner, repo_name, pr_number, title, state, 
+        INSERT INTO prs (pr_url, canonical_url, repo_owner, repo_name, pr_number, title, state, 
                        is_merged, mergeable_state, files_changed, author_login,                        author_avatar, repo_owner_avatar, checks_passed, checks_failed, checks_skipped, 
                        commits_count, behind_by, review_status, last_updated_at, 
                        last_refreshed_at, updated_at, is_draft, open_conversations_count, reviewers_json, etag)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(pr_url) DO UPDATE SET
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(repo_owner, repo_name, pr_number) DO UPDATE SET
+            pr_url = excluded.pr_url,
+            canonical_url = excluded.canonical_url,
             title = excluded.title,
             state = excluded.state,
             is_merged = excluded.is_merged,
@@ -289,7 +292,7 @@ async def upsert_pr(db, pr_url, owner, repo, pr_number, pr_data):
             reviewers_json = excluded.reviewers_json,
             etag = excluded.etag
     ''').bind(
-        pr_url, owner, repo, pr_number,
+        pr_url, canonical_url, owner, repo, pr_number,
         pr_data.get('title') or '',
         pr_data.get('state') or '',
         1 if pr_data.get('is_merged') else 0,

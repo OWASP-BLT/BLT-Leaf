@@ -7,7 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 // ANSI color codes for output
 const colors = {
@@ -20,16 +20,26 @@ const colors = {
 
 let testsPassed = 0;
 let testsFailed = 0;
+let testsSkipped = 0;
 
 function log(message, color = colors.reset) {
   console.log(`${color}${message}${colors.reset}`);
 }
 
-function testResult(testName, passed, message = '') {
-  if (passed) {
+function testResult(testName, statusOrPassed, message = '') {
+  const isExplicitStatus = statusOrPassed === 'passed' || statusOrPassed === 'failed' || statusOrPassed === 'skipped';
+  const status = isExplicitStatus
+    ? statusOrPassed
+    : (statusOrPassed ? 'passed' : 'failed');
+
+  if (status === 'passed') {
     testsPassed++;
     log(`✓ ${testName}`, colors.green);
     if (message) log(`  ${message}`, colors.blue);
+  } else if (status === 'skipped') {
+    testsSkipped++;
+    log(`- ${testName} (skipped)`, colors.yellow);
+    if (message) log(`  ${message}`, colors.yellow);
   } else {
     testsFailed++;
     log(`✗ ${testName}`, colors.red);
@@ -39,6 +49,27 @@ function testResult(testName, passed, message = '') {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForChildExit(child, timeoutMs = 800) {
+  if (!child) return true;
+  if (child.exitCode !== null) return true;
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('exit', onExit);
+      child.removeListener('close', onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(child.exitCode !== null), timeoutMs);
+    child.once('exit', onExit);
+    child.once('close', onExit);
+  });
 }
 
 function getSetCookieHeader(response) {
@@ -64,17 +95,79 @@ async function waitForEndpoint(url, timeoutMs = 25000) {
   return false;
 }
 
+async function terminateChildProcessTree(child) {
+  if (!child) return;
+
+  if (process.platform === 'win32' && child.pid) {
+    // Ensure cmd.exe wrapper and all descendant processes (wrangler, etc.) are terminated.
+    const result = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+
+    if (result.status !== 0) {
+      try {
+        child.kill('SIGTERM');
+      } catch (_) {
+        // Ignore cleanup failures while shutting down test runtime processes.
+      }
+    }
+    return;
+  }
+
+  try {
+    child.kill('SIGTERM');
+  } catch (_) {
+    return;
+  }
+
+  const exited = await waitForChildExit(child, 800);
+  if (!exited && child.exitCode === null) {
+    try {
+      child.kill('SIGKILL');
+    } catch (_) {
+      // Ignore cleanup failures while shutting down test runtime processes.
+    }
+  }
+}
+
 async function startRuntimeServer() {
   const port = 8788;
   const baseUrl = `http://127.0.0.1:${port}`;
-  const cmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const args = ['wrangler', 'dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--log-level', 'error'];
+  const wranglerArgs = ['wrangler', 'dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--log-level', 'error'];
 
-  const child = spawn(cmd, args, {
-    cwd: __dirname,
-    env: { ...process.env, BROWSER: 'none' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  if (process.platform === 'win32') {
+    const bashCheck = spawnSync('cmd.exe', ['/d', '/s', '/c', 'where bash'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    if (bashCheck.status !== 0) {
+      throw new Error('SKIP_RUNTIME_AUTH_TEST: bash not found (required by wrangler [build] command).');
+    }
+  }
+
+  let child;
+  if (process.platform === 'win32') {
+    // Spawning npx.cmd directly can fail with EINVAL on some Windows/Node setups.
+    const quoteForCmd = (arg) => {
+      const value = String(arg);
+      const escaped = value.replace(/"/g, '""');
+      return /[\s"&|<>^()%!]/.test(value) ? `"${escaped}"` : escaped;
+    };
+    const cmdLine = ['npx', ...wranglerArgs].map(quoteForCmd).join(' ');
+    child = spawn('cmd.exe', ['/d', '/s', '/c', cmdLine], {
+      cwd: __dirname,
+      env: { ...process.env, BROWSER: 'none' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+  } else {
+    child = spawn('npx', wranglerArgs, {
+      cwd: __dirname,
+      env: { ...process.env, BROWSER: 'none' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
 
   let output = '';
   child.stdout.on('data', (chunk) => {
@@ -86,7 +179,7 @@ async function startRuntimeServer() {
 
   const ready = await waitForEndpoint(`${baseUrl}/api/auth/user`);
   if (!ready) {
-    child.kill('SIGTERM');
+    await terminateChildProcessTree(child);
     throw new Error(`wrangler dev did not become ready within timeout. Output:\n${output}`);
   }
 
@@ -94,12 +187,8 @@ async function startRuntimeServer() {
 }
 
 async function stopRuntimeServer(runtime) {
-  if (!runtime || !runtime.child || runtime.child.killed) return;
-  runtime.child.kill('SIGTERM');
-  await sleep(800);
-  if (!runtime.child.killed) {
-    runtime.child.kill('SIGKILL');
-  }
+  if (!runtime || !runtime.child) return;
+  await terminateChildProcessTree(runtime.child);
 }
 
 // Test 1: Verify HTML file exists and contains required elements
@@ -691,7 +780,11 @@ async function testAuthenticationRuntimeBehavior() {
       logoutCookies ? 'Found state clear cookie header' : 'Missing Set-Cookie header'
     );
   } catch (error) {
-    testResult('Authentication runtime behavior test setup', false, error.message);
+    if (String(error.message || '').includes('SKIP_RUNTIME_AUTH_TEST:')) {
+      testResult('Authentication runtime behavior test setup', 'skipped', `Skipped: ${error.message}`);
+    } else {
+      testResult('Authentication runtime behavior test setup', false, error.message);
+    }
   } finally {
     await stopRuntimeServer(runtime);
   }
@@ -717,12 +810,14 @@ async function runTests() {
   log('  Test Summary', colors.blue);
   log('='.repeat(60), colors.blue);
 
-  const total = testsPassed + testsFailed;
+  const total = testsPassed + testsFailed + testsSkipped;
+  const executed = testsPassed + testsFailed;
   log(`\nTotal Tests: ${total}`);
   log(`Passed: ${testsPassed}`, colors.green);
+  log(`Skipped: ${testsSkipped}`, colors.yellow);
   log(`Failed: ${testsFailed}`, testsFailed > 0 ? colors.red : colors.green);
 
-  const successRate = total > 0 ? ((testsPassed / total) * 100).toFixed(1) : 0;
+  const successRate = executed > 0 ? ((testsPassed / executed) * 100).toFixed(1) : 100;
   log(`\nSuccess Rate: ${successRate}%\n`, successRate >= 90 ? colors.green : colors.yellow);
 
   // Exit with appropriate code

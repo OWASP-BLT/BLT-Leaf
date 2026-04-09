@@ -85,24 +85,32 @@ async def handle_add_pr(request, env):
         
         db = get_db(env)
         
+        normalized_pr_url = pr_url.strip()
+
         # Auto-detect URL type: if it's an org or repo URL (not a PR URL),
         # automatically treat as bulk import regardless of checkbox state
         if not add_all:
-            # Check if the URL is an org URL or a repo URL (not a PR URL)
-            if parse_org_url(pr_url) or (parse_repo_url(pr_url) and '/pull/' not in pr_url):
+            is_pr_url = False
+            try:
+                parse_pr_url(normalized_pr_url)
+                is_pr_url = True
+            except ValueError:
+                is_pr_url = False
+
+            if not is_pr_url and (parse_org_url(normalized_pr_url) or parse_repo_url(normalized_pr_url)):
                 add_all = True
         
         if add_all:
             org_owner = ''
             # Try parsing as a repo URL first (e.g. https://github.com/owner/repo)
-            parsed = parse_repo_url(pr_url)
+            parsed = parse_repo_url(normalized_pr_url)
             if parsed:
                 # Single repo import
                 repos_to_import = [{'owner': parsed['owner'], 'name': parsed['repo']}]
                 is_org_import = False
             else:
                 # Parse org url
-                org_parsed = parse_org_url(pr_url)
+                org_parsed = parse_org_url(normalized_pr_url)
                 if not org_parsed:
                     return Response.new(json.dumps({'error': 'Invalid GitHub Repository or Organization URL'}), 
                                       {'status': 400, 'headers': {'Content-Type': 'application/json'}})
@@ -211,7 +219,8 @@ async def handle_add_pr(request, env):
                         'reviewers_json': '[]'
                     }
 
-                    await upsert_pr(db, item['html_url'], owner, repo, item['number'], pr_data)
+                    canonical_pr_url = f"https://github.com/{owner}/{repo}/pull/{item['number']}"
+                    await upsert_pr(db, canonical_pr_url, owner, repo, item['number'], pr_data)
                     added_count += 1
             
             # Build response message
@@ -236,7 +245,7 @@ async def handle_add_pr(request, env):
             # Add single pr
             # Catch ValueError from parse_pr_url
             try:
-                parsed = parse_pr_url(pr_url)
+                parsed = parse_pr_url(normalized_pr_url)
             except ValueError as e:
                 return Response.new(
                     json.dumps({'error': str(e)}),
@@ -259,19 +268,20 @@ async def handle_add_pr(request, env):
                 return Response.new(json.dumps({'error': 'Cannot add merged/closed PRs'}), 
                                   {'status': 400, 'headers': {'Content-Type': 'application/json'}})
             
-            await upsert_pr(db, pr_url, parsed['owner'], parsed['repo'], parsed['pr_number'], pr_data)
+            canonical_pr_url = parsed['canonical_url']
+            await upsert_pr(db, canonical_pr_url, parsed['owner'], parsed['repo'], parsed['pr_number'], pr_data)
             
             # Auto-run readiness analysis for the newly added PR
             readiness_data = None
             try:
                 pr_result = await db.prepare(
-                    'SELECT * FROM prs WHERE pr_url = ?'
-                ).bind(pr_url).first()
+                    'SELECT * FROM prs WHERE repo_owner = ? COLLATE NOCASE AND repo_name = ? COLLATE NOCASE AND pr_number = ?'
+                ).bind(parsed['owner'], parsed['repo'], parsed['pr_number']).first()
                 if pr_result:
                     pr_row = pr_result.to_py()
                     readiness_data = await _run_readiness_analysis(env, pr_row, pr_row['id'], user_token)
             except Exception as analysis_err:
-                print(f"Auto-analysis failed for PR {pr_url}: {type(analysis_err).__name__}: {str(analysis_err)}")
+                print(f"Auto-analysis failed for PR {canonical_pr_url}: {type(analysis_err).__name__}: {str(analysis_err)}")
             
             # Include repo_owner, repo_name, pr_number, and pr_url in the response for frontend display
             response_data = {
@@ -279,7 +289,7 @@ async def handle_add_pr(request, env):
                 'repo_owner': parsed['owner'],
                 'repo_name': parsed['repo'],
                 'pr_number': parsed['pr_number'],
-                'pr_url': pr_url
+                'pr_url': canonical_pr_url
             }
             
             result_obj = {'success': True, 'data': response_data}
@@ -1110,8 +1120,8 @@ async def handle_github_webhook(request, env):
             db = get_db(env)
             pr_url = f"https://github.com/{repo_owner}/{repo_name}/pull/{pr_number}"
             result = await db.prepare(
-                'SELECT id FROM prs WHERE pr_url = ?'
-            ).bind(pr_url).first()
+                'SELECT id FROM prs WHERE repo_owner = ? COLLATE NOCASE AND repo_name = ? COLLATE NOCASE AND pr_number = ?'
+            ).bind(repo_owner, repo_name, pr_number).first()
             
             # Handle opened PRs - add to tracking automatically
             if action == 'opened':
@@ -1136,8 +1146,8 @@ async def handle_github_webhook(request, env):
                     
                     # Get the newly created PR ID
                     new_result = await db.prepare(
-                        'SELECT id FROM prs WHERE pr_url = ?'
-                    ).bind(pr_url).first()
+                        'SELECT id FROM prs WHERE repo_owner = ? COLLATE NOCASE AND repo_name = ? COLLATE NOCASE AND pr_number = ?'
+                    ).bind(repo_owner, repo_name, pr_number).first()
                     new_pr_id = new_result.to_py()['id'] if new_result else None
                     
                     return Response.new(
@@ -1295,8 +1305,8 @@ async def handle_github_webhook(request, env):
             for pr_number, repo_owner, repo_name in prs_to_update:
                 pr_url = f"https://github.com/{repo_owner}/{repo_name}/pull/{pr_number}"
                 result = await db.prepare(
-                    'SELECT id FROM prs WHERE pr_url = ?'
-                ).bind(pr_url).first()
+                    'SELECT id FROM prs WHERE repo_owner = ? COLLATE NOCASE AND repo_name = ? COLLATE NOCASE AND pr_number = ?'
+                ).bind(repo_owner, repo_name, pr_number).first()
                 
                 if not result:
                     # PR not being tracked - skip it

@@ -11,50 +11,73 @@ _CHANGES_REQUESTED_SCORE_MULTIPLIER = 0.5
 # Reduces overall readiness score by 33% when mergeable state is 'dirty' (conflicts)
 _MERGE_CONFLICTS_SCORE_MULTIPLIER = 0.67
 
+_GITHUB_PR_RE = re.compile(
+    r'^https?://github\.com/([^/?#\s]+)/([^/?#\s]+)/pull/(\d+)(?:[/?#].*)?$',
+    re.IGNORECASE,
+)
+_GITHUB_REPO_RE = re.compile(
+    r'^https?://github\.com/(?!orgs(?:/|$))([^/?#\s]+)/([^/?#\s]+)/?(?:[?#].*)?$',
+    re.IGNORECASE,
+)
+_GITHUB_ORG_RE = re.compile(
+    r'^https?://github\.com/(?:orgs/)?([A-Za-z0-9_.-]+)/?(?:[?#].*)?$',
+    re.IGNORECASE,
+)
 
-def parse_pr_url(pr_url):
+
+def parse_pr_url(pr_url: str):
     """
-    Parse GitHub PR URL to extract owner, repo, and PR number.
-    
-    Security Hardening (Issue #45):
-    - Type validation to prevent type confusion attacks
-    - Anchored regex pattern to block malformed URLs with trailing junk
-    - Raises ValueError instead of returning None for better error handling
+    Validates and parses a GitHub PR URL.
+    Returns a dict with owner, repo, and pr_number or raises ValueError.
     """
-    # FIX Issue #45: Type validation
     if not isinstance(pr_url, str):
         raise ValueError("PR URL must be a string")
     
     if not pr_url:
         raise ValueError("PR URL is required")
     
-    pr_url = pr_url.strip().rstrip('/')
-    
-    # FIX Issue #45: Anchored regex - must match EXACTLY, no trailing junk allowed
-    pattern = r'^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)$'
-    match = re.match(pattern, pr_url)
-    
+    normalized_url = pr_url.strip()
+    match = _GITHUB_PR_RE.match(normalized_url)
+
     if not match:
-        # FIX Issue #45: Raise error instead of returning None
-        raise ValueError("Invalid GitHub PR URL. Format: https://github.com/OWNER/REPO/pull/NUMBER")
-    
+        raise ValueError(
+            "Invalid GitHub PR URL. Expected format: "
+            "https://github.com/owner/repo/pull/123"
+        )
+
+    owner, repo, pr_num_str = match.group(1), match.group(2), match.group(3)
+    pr_number = int(pr_num_str)
+
+    if pr_number < 1:
+        raise ValueError("PR number must be a positive integer.")
+
+    # Return as a dictionary to match the original function's signature
     return {
-        'owner': match.group(1),
-        'repo': match.group(2),
-        'pr_number': int(match.group(3))
+        'owner': owner,
+        'repo': repo,
+        'pr_number': pr_number,
+        'canonical_url': f"https://github.com/{owner}/{repo}/pull/{pr_number}"
     }
 
 
 def parse_repo_url(url):
     """Parse GitHub Repo URL to extract owner and repo name"""
-    if not url: return None
-    url = url.strip().rstrip('/')
-    pattern = r'https?://github\.com/([^/]+)/([^/]+)(?:/.*)?$'
-    match = re.match(pattern, url)
+    if not url:
+        return None
+    normalized_url = url.strip()
+    match = _GITHUB_REPO_RE.match(normalized_url)
     if match:
+        owner = match.group(1)
+        # Security guard: don't misroute /orgs/<owner> bulk URLs to parse_repo_url()
+        # GitHub uses /orgs/<owner> for organization homepages/dashboards.
+        if owner.lower() == 'orgs':
+            return None
+            
+        repo = match.group(2)
         return {
-            'owner': match.group(1),
-            'repo': match.group(2)
+            'owner': owner,
+            'repo': repo,
+            'canonical_url': f"https://github.com/{owner}/{repo}"
         }
     return None
 
@@ -65,21 +88,22 @@ def parse_org_url(url):
     """
     if not url:
         return None
-    url = url.strip().rstrip('/')
-    # Match org/user URL: github.com/<owner> with no further path segments
-    pattern = r'^https?://github\.com/([A-Za-z0-9_.-]+)$'
-    match = re.match(pattern, url)
+    normalized_url = url.strip()
+    match = _GITHUB_ORG_RE.match(normalized_url)
     if match:
         owner = match.group(1)
         # Exclude GitHub reserved paths that aren't orgs/users
         reserved = {'settings', 'organizations', 'explore', 'marketplace',
                     'notifications', 'new', 'login', 'signup', 'features',
                     'enterprise', 'pricing', 'topics', 'collections',
-                    'trending', 'sponsors', 'about', 'security', 'pulls',
+                    'trending', 'sponsors', 'about', 'security', 'pulls', 'orgs',
                     'issues', 'codespaces', 'discussions'}
         if owner.lower() in reserved:
             return None
-        return {'owner': owner}
+        return {
+            'owner': owner,
+            'canonical_url': f"https://github.com/{owner}"
+        }
     return None
 
 
