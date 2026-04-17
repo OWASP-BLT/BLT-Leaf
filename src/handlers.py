@@ -2,6 +2,7 @@
 
 import json
 import re
+import asyncio
 from datetime import datetime, timezone
 from js import Response, Headers, Object
 from pyodide.ffi import to_js
@@ -21,7 +22,8 @@ from cache import (
 from database import get_db, upsert_pr
 from github_api import (
     fetch_pr_data, fetch_pr_timeline_data, fetch_paginated_data,
-    verify_github_signature, fetch_multiple_prs_batch, fetch_org_repos
+    verify_github_signature, fetch_multiple_prs_batch, fetch_org_repos,
+    fetch_repo_open_pr_numbers, fetch_repo_open_prs, fetch_repo_comparison_batch
 )
 from auth import resolve_github_token, clear_session_cookie
 from slack_notifier import notify_slack_exception, notify_slack_error
@@ -664,24 +666,36 @@ async def handle_batch_refresh_prs(request, env):
         db = get_db(env)
         prs_to_fetch = []
         pr_lookup = {}  # Maps (owner, repo, pr_number) -> (pr_id, pr_url, etag)
-        
+
+        unique_pr_ids = []
+        seen_ids = set()
         for pr_id in pr_ids:
-            stmt = db.prepare('SELECT pr_url, repo_owner, repo_name, pr_number, etag FROM prs WHERE id = ?').bind(pr_id)
-            result = await stmt.first()
-            
-            if not result:
-                print(f"PR ID {pr_id} not found, skipping")
-                continue
-            
-            result = result.to_py()
-            owner = result['repo_owner']
-            repo = result['repo_name']
-            pr_number = result['pr_number']
-            pr_url = result['pr_url']
-            etag = result.get('etag')
-            
+            if pr_id not in seen_ids:
+                seen_ids.add(pr_id)
+                unique_pr_ids.append(pr_id)
+
+        placeholders = ','.join(['?'] * len(unique_pr_ids))
+        rows_result = await db.prepare(
+            f'SELECT id, pr_url, repo_owner, repo_name, pr_number, etag FROM prs WHERE id IN ({placeholders})'
+        ).bind(*unique_pr_ids).all()
+
+        rows = rows_result.results.to_py() if hasattr(rows_result, 'results') else []
+        found_ids = set()
+        for row in rows:
+            pr_id = row['id']
+            found_ids.add(pr_id)
+            owner = row['repo_owner']
+            repo = row['repo_name']
+            pr_number = row['pr_number']
+            pr_url = row['pr_url']
+            etag = row.get('etag')
+
             prs_to_fetch.append((owner, repo, pr_number))
             pr_lookup[(owner, repo, pr_number)] = (pr_id, pr_url, etag)
+
+        for pr_id in unique_pr_ids:
+            if pr_id not in found_ids:
+                print(f"PR ID {pr_id} not found, skipping")
         
         if not prs_to_fetch:
             return Response.new(json.dumps({'error': 'No valid PRs found'}), 
@@ -743,8 +757,319 @@ async def handle_batch_refresh_prs(request, env):
                           {'status': 500, 'headers': {'Content-Type': 'application/json'}})
 
 
+async def handle_refresh_repo(request, env):
+    """
+    Refresh tracked PRs for a single repository with repo-level GraphQL calls.
+
+    POST /api/refresh-repo
+    Body: { "repo": "owner/name" }
+
+    This endpoint is optimized for the "base branch moved" case and updates
+    behind_by for all tracked PRs in the repository via batched comparisons.
+    """
+    try:
+        token_info = await resolve_github_token(request, env)
+        user_token = token_info['token']
+        if not user_token:
+            return Response.new(
+                json.dumps({'error': 'Unauthorized: GitHub token is required'}),
+                {'status': 401, 'headers': {'Content-Type': 'application/json'}},
+            )
+        
+        # Validate caller-supplied header token format when it is the selected auth source.
+        if token_info.get('token_source') == 'header_token' and (
+            len(user_token) < 20 or any(ch.isspace() for ch in user_token)
+        ):
+            return Response.new(
+                json.dumps({'error': 'Forbidden: invalid x-github-token format'}),
+                {'status': 403, 'headers': {'Content-Type': 'application/json'}},
+            )
+        
+        try:
+            data = (await request.json()).to_py()
+        except Exception:
+            return Response.new(
+                json.dumps({'error': 'Malformed JSON payload'}),
+                {'status': 400, 'headers': {'Content-Type': 'application/json'}},
+            )
+        repo_param = (data.get('repo') or '').strip()
+
+        if not repo_param:
+            return Response.new(json.dumps({'error': 'repo parameter is required (owner/name)'}),
+                              {'status': 400, 'headers': {'Content-Type': 'application/json'}})
+
+        # Accept either owner/name or full GitHub repo URL
+        parsed_repo = parse_repo_url(repo_param)
+        if parsed_repo:
+            owner = parsed_repo['owner']
+            repo_name = parsed_repo['repo']
+        else:
+            parts = repo_param.split('/')
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                return Response.new(json.dumps({'error': 'repo must be in format owner/name'}),
+                                  {'status': 400, 'headers': {'Content-Type': 'application/json'}})
+            owner = parts[0]
+            repo_name = parts[1]
+
+        db = get_db(env)
+
+        # Load currently tracked PRs for this repository
+        tracked_stmt = db.prepare(
+            'SELECT id, pr_url, repo_owner, repo_name, pr_number, behind_by FROM prs WHERE repo_owner = ? AND repo_name = ?'
+        ).bind(owner, repo_name)
+        tracked_result = await tracked_stmt.all()
+        tracked_rows = tracked_result.results.to_py() if hasattr(tracked_result, 'results') else []
+        tracked_map = {row['pr_number']: row for row in tracked_rows}
+        tracked_numbers = set(tracked_map.keys())
+
+        repo_refresh_data = await fetch_repo_open_prs(owner, repo_name, user_token, include_metadata=True)
+        repo_open_prs = repo_refresh_data.get('prs', [])
+
+        caller_scoped_token = _is_caller_scoped_token(token_info)
+        if caller_scoped_token and repo_refresh_data.get('repo_is_private'):
+            print(f"Security: Rejected caller-scoped repo refresh for private repo {owner}/{repo_name}")
+            return _private_repo_rejected_response()
+
+        open_numbers = {pr.get('number') for pr in repo_open_prs if pr.get('number') is not None}
+
+        removed = 0
+        updated = 0
+        discovered = 0
+        discovered_candidates = []
+        tracked_updates = []
+
+        # Remove PRs no longer open
+        closed_numbers = tracked_numbers - open_numbers
+        ids_to_delete = [tracked_map[pr_number]['id'] for pr_number in closed_numbers]
+
+        # Compute behind_by for all open PRs in this repo
+        behind_by_map = await fetch_repo_comparison_batch(owner, repo_name, repo_open_prs, user_token)
+
+        ts = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+        for pr in repo_open_prs:
+            pr_number = pr.get('number')
+            if pr_number is None:
+                continue
+
+            author = pr.get('author') or {}
+            repo_owner_avatar = (pr.get('baseRepository') or {}).get('owner', {}).get('avatarUrl', '')
+            behind_by = behind_by_map.get(pr_number)
+            if behind_by is None:
+                if pr_number in tracked_map:
+                    behind_by = tracked_map[pr_number]['behind_by']
+                else:
+                    # Keep newly discovered PRs even when compare data is temporarily unavailable.
+                    behind_by = 0
+
+            if pr_number in tracked_map:
+                row = tracked_map[pr_number]
+                tracked_updates.append({
+                    'id': row['id'],
+                    'pr_number': pr_number,
+                    'title': pr.get('title', ''),
+                    'author_login': author.get('login', 'ghost'),
+                    'author_avatar': author.get('avatarUrl', ''),
+                    'repo_owner_avatar': repo_owner_avatar,
+                    'behind_by': behind_by,
+                    'is_draft': 1 if pr.get('isDraft') else 0,
+                    'last_updated_at': pr.get('updatedAt', ts)
+                })
+            else:
+                pr_url = f"https://github.com/{owner}/{repo_name}/pull/{pr_number}"
+                discovered_candidates.append({
+                    'pr_number': pr_number,
+                    'pr_url': pr_url,
+                    'fallback': {
+                        'title': pr.get('title', ''),
+                        'state': 'open',
+                        'is_merged': 0,
+                        'author_login': author.get('login', 'ghost'),
+                        'author_avatar': author.get('avatarUrl', ''),
+                        'repo_owner_avatar': repo_owner_avatar,
+                        'last_updated_at': pr.get('updatedAt', ts),
+                        'behind_by': behind_by,
+                        'is_draft': 1 if pr.get('isDraft') else 0,
+                    }
+                })
+
+        # Enrich newly discovered PRs before inserting to avoid placeholder CI/review fields
+        if discovered_candidates:
+            discovered_keys = [(owner, repo_name, item['pr_number']) for item in discovered_candidates]
+            batch_results = await fetch_multiple_prs_batch(discovered_keys, user_token)
+
+            fallback_fetch_map = {}
+            missing_items = []
+            for item in discovered_candidates:
+                key = (owner, repo_name, item['pr_number'])
+                if not batch_results.get(key):
+                    missing_items.append(item)
+
+            if missing_items:
+                fallback_tasks = [
+                    fetch_pr_data(owner, repo_name, item['pr_number'], user_token)
+                    for item in missing_items
+                ]
+                fallback_results = await asyncio.gather(*fallback_tasks, return_exceptions=True)
+                for item, result in zip(missing_items, fallback_results):
+                    key = (owner, repo_name, item['pr_number'])
+                    if isinstance(result, Exception):
+                        print(f"Fallback fetch failed for {owner}/{repo_name}#{item['pr_number']}: {result}")
+                        fallback_fetch_map[key] = None
+                    else:
+                        fallback_fetch_map[key] = result
+
+            discovered_rows = []
+
+            for item in discovered_candidates:
+                pr_number = item['pr_number']
+                pr_url = item['pr_url']
+                fallback_data = item['fallback']
+                key = (owner, repo_name, pr_number)
+
+                pr_data = batch_results.get(key)
+
+                # Fall back to single-PR REST fetch if batch data is missing
+                if not pr_data:
+                    pr_data = fallback_fetch_map.get(key)
+
+                if not pr_data or pr_data.get('not_found') or pr_data.get('not_modified'):
+                    print(f"Skipping discovered PR {owner}/{repo_name}#{pr_number}: unable to fetch enriched data")
+                    continue
+
+                # Keep repo-level behind_by from this refresh so values are consistent across rows
+                merged_data = {**fallback_data, **pr_data}
+                merged_data['behind_by'] = fallback_data['behind_by']
+
+                discovered_rows.append((pr_url, pr_number, merged_data))
+
+            # Apply delete/update/insert as one unit to avoid transient partial repo views.
+            await db.prepare('BEGIN').run()
+            try:
+                if ids_to_delete:
+                    delete_placeholders = ','.join(['?'] * len(ids_to_delete))
+                    await db.prepare(f'DELETE FROM prs WHERE id IN ({delete_placeholders})').bind(*ids_to_delete).run()
+
+                for update_row in tracked_updates:
+                    await db.prepare('''
+                        UPDATE prs
+                        SET
+                            title = ?,
+                            state = 'open',
+                            is_merged = 0,
+                            author_login = ?,
+                            author_avatar = ?,
+                            repo_owner_avatar = ?,
+                            behind_by = ?,
+                            is_draft = ?,
+                            last_updated_at = ?,
+                            last_refreshed_at = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''').bind(
+                        update_row['title'],
+                        update_row['author_login'],
+                        update_row['author_avatar'],
+                        update_row['repo_owner_avatar'],
+                        update_row['behind_by'],
+                        update_row['is_draft'],
+                        update_row['last_updated_at'],
+                        ts,
+                        update_row['id']
+                    ).run()
+
+                for pr_url, pr_number, merged_data in discovered_rows:
+                    await upsert_pr(db, pr_url, owner, repo_name, pr_number, merged_data)
+
+                await db.prepare('COMMIT').run()
+            except Exception:
+                await db.prepare('ROLLBACK').run()
+                raise
+
+            removed += len(ids_to_delete)
+            updated += len(tracked_updates)
+            discovered += len(discovered_rows)
+
+            for pr_number in closed_numbers:
+                row = tracked_map[pr_number]
+                await invalidate_readiness_cache(env, row['id'])
+                await invalidate_timeline_cache(env, owner, repo_name, pr_number)
+
+            for update_row in tracked_updates:
+                await invalidate_readiness_cache(env, update_row['id'])
+                await invalidate_timeline_cache(env, owner, repo_name, update_row['pr_number'])
+        else:
+            await db.prepare('BEGIN').run()
+            try:
+                if ids_to_delete:
+                    delete_placeholders = ','.join(['?'] * len(ids_to_delete))
+                    await db.prepare(f'DELETE FROM prs WHERE id IN ({delete_placeholders})').bind(*ids_to_delete).run()
+
+                for update_row in tracked_updates:
+                    await db.prepare('''
+                        UPDATE prs
+                        SET
+                            title = ?,
+                            state = 'open',
+                            is_merged = 0,
+                            author_login = ?,
+                            author_avatar = ?,
+                            repo_owner_avatar = ?,
+                            behind_by = ?,
+                            is_draft = ?,
+                            last_updated_at = ?,
+                            last_refreshed_at = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''').bind(
+                        update_row['title'],
+                        update_row['author_login'],
+                        update_row['author_avatar'],
+                        update_row['repo_owner_avatar'],
+                        update_row['behind_by'],
+                        update_row['is_draft'],
+                        update_row['last_updated_at'],
+                        ts,
+                        update_row['id']
+                    ).run()
+
+                await db.prepare('COMMIT').run()
+            except Exception:
+                await db.prepare('ROLLBACK').run()
+                raise
+
+            removed += len(ids_to_delete)
+            updated += len(tracked_updates)
+
+            for pr_number in closed_numbers:
+                row = tracked_map[pr_number]
+                await invalidate_readiness_cache(env, row['id'])
+                await invalidate_timeline_cache(env, owner, repo_name, pr_number)
+
+            for update_row in tracked_updates:
+                await invalidate_readiness_cache(env, update_row['id'])
+                await invalidate_timeline_cache(env, owner, repo_name, update_row['pr_number'])
+
+        return Response.new(json.dumps({
+            'success': True,
+            'repo': f'{owner}/{repo_name}',
+            'tracked_before': len(tracked_rows),
+            'open_on_github': len(repo_open_prs),
+            'updated': updated,
+            'discovered': discovered,
+            'removed': removed,
+            'rate_limit': get_rate_limit_cache()
+        }), {'headers': {'Content-Type': 'application/json'}})
+
+    except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_refresh_repo'})
+        return Response.new(json.dumps({'error': 'Internal server error'}),
+                          {'status': 500, 'headers': {'Content-Type': 'application/json'}})
+        
 async def handle_refresh_org(request, env):
-    """Discover and upsert open PRs for an organization's public repositories."""
+    """
+    Discover and import new repositories and PRs for an organization.
+    """
     try:
         data = (await request.json()).to_py()
         org = (data.get('org') or '').strip()
@@ -1771,18 +2096,27 @@ async def handle_pr_readiness(request, env, path):
 
 async def handle_scheduled_refresh(env):
     """
-    Hourly scheduled task: refresh all PRs in the database with minimal API calls.
+    Hourly scheduled task: refresh all PRs in the database.
 
-    Uses the GraphQL batch API to update up to 50 PRs per request, covering all
-    tracked PRs in the fewest possible round-trips.  Closed/merged PRs are
-    removed from the database automatically.
+    Two-phase approach to minimise GitHub API consumption:
+
+    Phase 1 — Repository-level refresh (REST requests with pagination per unique repo):
+        For each repository currently tracked, fetch the list of open PR numbers.
+        REST requests are issued in paginated batches per repository; the actual number
+        of API calls depends on repository pagination size and total PR count.
+        PRs that are no longer open are removed from the database immediately.
+        New PRs that are now open (and not yet tracked) are added with basic data so they appear in the dashboard without waiting for a manual import.
+
+    Phase 2 — PR-level refresh (GraphQL requests in chunked/batched calls):
+        Batch-update full PR data for all PRs that are confirmed still open after Phase 1.
+        GraphQL requests are issued in chunked/batched calls; the actual number of API calls
+        depends on chunk size and total PR count after Phase 1.
     """
     token = getattr(env, 'GITHUB_TOKEN', None)
 
     try:
         db = get_db(env)
 
-        # Fetch only the fields needed to build the batch request
         stmt = db.prepare('SELECT id, pr_url, repo_owner, repo_name, pr_number FROM prs')
         result = await stmt.all()
 
@@ -1791,24 +2125,95 @@ async def handle_scheduled_refresh(env):
             return
 
         rows = [row.to_py() if hasattr(row, 'to_py') else dict(row) for row in result.results]
-        print(f"Scheduled refresh: updating {len(rows)} PR(s)")
+        print(f"Scheduled refresh: found {len(rows)} tracked PR(s)")
 
-        # Build lookup: (owner, repo, pr_number) -> (pr_id, pr_url)
+        # Phase 1: Repository-level refresh - group PRs by repo to minimise API calls
+        repos = {}
+        for row in rows:
+            key = (row['repo_owner'], row['repo_name'])
+            repos.setdefault(key, []).append(row)
+
+        print(f"Scheduled refresh phase 1: scanning {len(repos)} unique repository(ies)")
+
+        removed_phase1 = 0
+        confirmed_open_rows = []
+        ts = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+        for (owner, repo_name), repo_prs in repos.items():
+            try:
+                open_numbers = await fetch_repo_open_pr_numbers(owner, repo_name, token)
+
+                # Build set of PR numbers already tracked for this repo
+                tracked_numbers = {row['pr_number'] for row in repo_prs}
+
+                # Remove PRs that are no longer open in GitHub
+                for row in repo_prs:
+                    if row['pr_number'] not in open_numbers:
+                        pr_id = row['id']
+                        await invalidate_readiness_cache(env, pr_id)
+                        await invalidate_timeline_cache(env, owner, repo_name, row['pr_number'])
+                        await db.prepare('DELETE FROM prs WHERE id = ?').bind(pr_id).run()
+                        print(f"Scheduled refresh: removed closed/merged PR {owner}/{repo_name}#{row['pr_number']}")
+                        removed_phase1 += 1
+                    else:
+                        confirmed_open_rows.append(row)
+
+                # Discover and insert newly-opened PRs not yet tracked
+                new_numbers = open_numbers - tracked_numbers
+                if new_numbers:
+                    print(f"Scheduled refresh: discovered {len(new_numbers)} new PR(s) in {owner}/{repo_name}: {sorted(new_numbers)}")
+                    headers_dict = {
+                        'User-Agent': 'PR-Tracker/1.0',
+                        'Accept': 'application/vnd.github+json',
+                        'X-GitHub-Api-Version': '2022-11-28'
+                    }
+                    if token:
+                        headers_dict['Authorization'] = f'Bearer {token}'
+                    list_url = f"https://api.github.com/repos/{owner}/{repo_name}/pulls?state=open&per_page=100"
+                    new_prs_list = await fetch_paginated_data(list_url, headers_dict, github_token=token)
+                    for item in new_prs_list:
+                        if item['number'] not in new_numbers:
+                            continue
+                        pr_url = item['html_url']
+                        # Defer insertion until Phase 2 to avoid persisting placeholder zero metrics.
+                        confirmed_open_rows.append({
+                            'id': None,
+                            'pr_url': pr_url,
+                            'repo_owner': owner,
+                            'repo_name': repo_name,
+                            'pr_number': item['number']
+                        })
+
+            except Exception as repo_err:
+                print(f"Scheduled refresh phase 1: error scanning {owner}/{repo_name}: {repo_err}")
+                # If the repo scan fails - keep existing tracked PRs so Phase 2 still updates them
+                confirmed_open_rows.extend(repo_prs)
+
+        print(f"Scheduled refresh phase 1 complete: removed={removed_phase1}, confirmed_open={len(confirmed_open_rows)}")
+
+        if not confirmed_open_rows:
+            print("Scheduled refresh: no open PRs remaining after phase 1")
+            return
+
+        # Phase 2: PR-level refresh - batch fetch full PR data for all confirmed open PRs
+        print(f"Scheduled refresh phase 2: updating {len(confirmed_open_rows)} PR(s)")
+
         prs_to_fetch = []
         pr_lookup = {}
-        for row in rows:
+        for row in confirmed_open_rows:
             key = (row['repo_owner'], row['repo_name'], row['pr_number'])
             prs_to_fetch.append(key)
             pr_lookup[key] = (row['id'], row['pr_url'])
 
-        # Batch-fetch all PRs via GraphQL (50 per request)
         batch_results = await fetch_multiple_prs_batch(prs_to_fetch, token)
 
         updated = 0
-        removed = 0
+        removed_phase2 = 0
         errors = 0
 
         for (owner, repo, pr_number), pr_data in batch_results.items():
+            if (owner, repo, pr_number) not in pr_lookup:
+                continue
             pr_id, pr_url = pr_lookup[(owner, repo, pr_number)]
 
             if not pr_data:
@@ -1816,26 +2221,36 @@ async def handle_scheduled_refresh(env):
                 errors += 1
                 continue
 
-            # Remove PRs that are now closed or merged
+            # Edge case: PR closed between Phase 1 and Phase 2
             if pr_data.get('is_merged') or pr_data.get('state') == 'closed':
-                await invalidate_readiness_cache(env, pr_id)
-                await invalidate_timeline_cache(env, owner, repo, pr_number)
-                await db.prepare('DELETE FROM prs WHERE id = ?').bind(pr_id).run()
+                if pr_id:
+                    await invalidate_readiness_cache(env, pr_id)
+                    await invalidate_timeline_cache(env, owner, repo, pr_number)
+                    await db.prepare('DELETE FROM prs WHERE id = ?').bind(pr_id).run()
                 status_msg = 'merged' if pr_data.get('is_merged') else 'closed'
                 print(f"Scheduled refresh: removed {status_msg} PR {owner}/{repo}#{pr_number}")
-                removed += 1
+                removed_phase2 += 1
                 continue
 
             try:
                 await upsert_pr(db, pr_url, owner, repo, pr_number, pr_data)
-                await invalidate_readiness_cache(env, pr_id)
-                await invalidate_timeline_cache(env, owner, repo, pr_number)
+                if pr_id:
+                    await invalidate_readiness_cache(env, pr_id)
+                    await invalidate_timeline_cache(env, owner, repo, pr_number)
                 updated += 1
             except Exception as update_err:
                 print(f"Scheduled refresh: error updating {owner}/{repo}#{pr_number}: {update_err}")
                 errors += 1
 
-        print(f"Scheduled refresh complete: updated={updated}, removed={removed}, errors={errors}")
+        total_removed = removed_phase1 + removed_phase2
+        print(f"Scheduled refresh complete: updated={updated}, removed={total_removed}, errors={errors}")
 
     except Exception as e:
         print(f"Scheduled refresh failed: {type(e).__name__}: {e}")
+        await notify_slack_exception(
+            getattr(env, 'SLACK_ERROR_WEBHOOK', ''),
+            e,
+            context={'handler': 'handle_scheduled_refresh'}
+        )
+        raise
+
