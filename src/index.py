@@ -123,7 +123,14 @@ async def on_fetch(request, env):
         response = None
         
         if path == '/api/prs/updates' and request.method == 'GET':
-            response = await handle_pr_updates_check(env)
+            after_id_str = url.searchParams.get('after_id')
+            after_id = None
+            if after_id_str:
+                try:
+                    after_id = int(after_id_str)
+                except (ValueError, TypeError):
+                    after_id = None
+            response = await handle_pr_updates_check(env, after_id=after_id)
         elif path == '/api/prs':
             if request.method == 'GET':
                 repo = url.searchParams.get('repo')
