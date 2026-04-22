@@ -12,7 +12,8 @@
     "lint": "echo 'Linting not configured yet' && exit 0",
     "format:check": "echo 'Format checking not configured yet' && exit 0",
     "test": "node test-data-display.js",
-    "test:data-display": "node test-data-display.js"
+    "test:data-display": "node test-data-display.js",
+    "test:flakiness": "python -m unittest discover -s scripts/flakiness/tests -p \"test_*.py\" -v"
   },
   "keywords": [
     "github",

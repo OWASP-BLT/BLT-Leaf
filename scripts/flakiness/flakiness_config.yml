@@ -1,0 +1,33 @@
+thresholds:
+  window_size: 20                         # number of recent runs to analyze
+  min_runs: 5                             # minimum runs required before scoring
+  flaky_min_rate: 0.10                    # failure rate lower bound for flaky classification
+  flaky_max_rate: 0.60                    # failure rate upper bound; above this = deterministic
+  consecutive_failures_deterministic: 3   # N consecutive failures = deterministic failure
+
+severity:
+  low:    [0.10, 0.20]
+  medium: [0.20, 0.40]
+  high:   [0.40, 1.00]
+
+infrastructure_patterns:
+  - "ECONNRESET"
+  - "timed_out"
+  - "timeout"
+  - "rate limit"
+  - "ETIMEDOUT"
+  - "fetch failed"
+  - "network error"
+  - "Could not resolve host"
+  - "npm ERR!"
+  - "pip install failed"
+
+labels:
+  flaky_test:     "flaky-test"
+  infrastructure: "ci-instability"
+
+github:
+  issue_title_prefix:   "[Flaky Test]"
+  pr_comment_on_flake:  true
+  block_merge_on_flake: false
+  history_prune_days:   90               # rows older than this are pruned from ci_run_history
