@@ -1919,21 +1919,43 @@
 
         /**
          * Check for PR updates by fetching lightweight timestamp data
-         * Compare with local cache to detect changes
+         * Compare with local cache to detect changes.
+         *
+         * The /api/prs/updates endpoint is paginated (cursor-based, after_id)
+         * to avoid D1 storage-operation timeouts on large datasets.
+         * We fetch all pages here before processing changes so that removal
+         * detection remains accurate across the whole PR set.
          */
         async function checkForPrUpdates() {
             if (!autoRefreshEnabled) return;
 
             try {
-                const response = await fetch('/api/prs/updates');
-                const data = await response.json();
+                // Collect all pages from the paginated updates endpoint.
+                const allUpdates = [];
+                let afterId = null;
+                let hasMore = true;
+                while (hasMore) {
+                    const url = afterId
+                        ? `/api/prs/updates?after_id=${afterId}`
+                        : '/api/prs/updates';
+                    const response = await fetch(url);
+                    const data = await response.json();
 
-                if (data.error) {
-                    console.error('Error checking for updates:', data.error);
-                    return;
+                    if (data.error) {
+                        console.error('Error checking for updates:', data.error);
+                        return;
+                    }
+
+                    const page = data.updates || [];
+                    allUpdates.push(...page);
+                    hasMore = data.has_more === true;
+                    if (hasMore && page.length > 0) {
+                        afterId = page[page.length - 1].id;
+                    } else {
+                        hasMore = false;
+                    }
                 }
 
-                const updates = data.updates || [];
                 const changedPrIds = [];
                 const newPrIds = [];
                 const removedPrIds = [];
@@ -1942,7 +1964,7 @@
                 const isFirstCheck = Object.keys(prUpdateTimestamps).length === 0;
 
                 // Detect changes and new PRs
-                updates.forEach(update => {
+                allUpdates.forEach(update => {
                     const oldTimestamp = prUpdateTimestamps[update.id];
                     if (oldTimestamp === undefined) {
                         // PR not seen before - it's newly added
@@ -1955,7 +1977,7 @@
 
                 // Detect removals (PRs that were in cache but not in update)
                 // Use Set for O(1) lookup instead of O(n) find operation
-                const currentPrIds = new Set(updates.map(u => u.id));
+                const currentPrIds = new Set(allUpdates.map(u => u.id));
                 Object.keys(prUpdateTimestamps).forEach(prId => {
                     const prIdNum = parseInt(prId);
                     if (!currentPrIds.has(prIdNum)) {
@@ -2001,7 +2023,7 @@
                 // were detected, the view may be stuck in an empty state due to a prior bug.
                 // Trigger a reload (skipped on the first check to avoid conflicting with
                 // the initial loadPrs() call that runs concurrently at page startup).
-                if (!isFirstCheck && allPrs.length === 0 && updates.length > 0 &&
+                if (!isFirstCheck && allPrs.length === 0 && allUpdates.length > 0 &&
                         changedPrIds.length === 0 && removedPrIds.length === 0) {
                     await loadPrs(true);
                 }
