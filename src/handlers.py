@@ -962,6 +962,152 @@ async def handle_status(env):
             }
         }), {'headers': {'Content-Type': 'application/json'}})
 
+async def handle_dashboard(env):
+    """
+    GET /api/dashboard
+    Returns aggregated health summary of all tracked PRs.
+
+    Computes the following from the database in minimal queries:
+    - Total PR counts and readiness distribution
+    - CI health breakdown
+    - Top blocked repositories
+    - Most active authors
+    - Stale PR count (not updated in 30+ days)
+
+    No GitHub API calls are made - purely aggregates existing DB data.
+    """
+    try:
+        db = get_db(env)
+
+        # ── 1. Overall summary counts ──────────────────────────────────────
+        summary_result = await db.prepare('''
+            SELECT
+                COUNT(*) AS total_prs,
+                COALESCE(SUM(CASE WHEN merge_ready = 1 THEN 1 ELSE 0 END), 0) AS merge_ready,
+                COALESCE(SUM(CASE WHEN is_draft = 1 THEN 1 ELSE 0 END), 0) AS draft_prs,
+                COALESCE(SUM(CASE WHEN checks_failed > 0 THEN 1 ELSE 0 END), 0) AS has_ci_failures,
+                COALESCE(SUM(CASE WHEN checks_failed = 0 AND checks_passed > 0 THEN 1 ELSE 0 END), 0) AS all_ci_passing,
+                COALESCE(SUM(CASE WHEN checks_passed = 0 AND checks_failed = 0 THEN 1 ELSE 0 END), 0) AS no_checks,
+                COALESCE(SUM(CASE WHEN datetime(last_updated_at) < datetime('now', '-30 days') THEN 1 ELSE 0 END), 0) AS stale_prs
+            FROM prs
+            WHERE is_merged = 0 AND state = 'open'
+        ''').first()
+
+        # ── 2. Readiness classification distribution ───────────────────────
+        readiness_result = await db.prepare('''
+            SELECT
+                COALESCE(classification, 'UNANALYZED') AS classification,
+                COUNT(*) AS count
+            FROM prs
+            WHERE is_merged = 0 AND state = 'open'
+            GROUP BY classification
+        ''').all()
+
+        # ── 3. Top blocked repositories (most PRs with blockers) ──────────
+        blocked_repos_result = await db.prepare('''
+            SELECT
+                repo_owner || '/' || repo_name AS repo,
+                COUNT(*) AS blocked_count
+            FROM prs
+            WHERE is_merged = 0 AND state = 'open'
+              AND blockers IS NOT NULL
+              AND json_array_length(blockers) > 0
+            GROUP BY repo_owner, repo_name
+            ORDER BY blocked_count DESC
+            LIMIT 5
+        ''').all()
+
+        # ── 4. Most active authors ─────────────────────────────────────────
+        authors_result = await db.prepare('''
+            SELECT
+                author_login,
+                COUNT(*) AS pr_count
+            FROM prs
+            WHERE is_merged = 0 AND state = 'open'
+              AND author_login IS NOT NULL AND author_login != ''
+            GROUP BY author_login
+            ORDER BY pr_count DESC
+            LIMIT 5
+        ''').all()
+
+        # ── Parse results ──────────────────────────────────────────────────
+        def _to_py(r):
+            return r.to_py() if hasattr(r, 'to_py') else dict(r)
+
+        summary = _to_py(summary_result) if summary_result else {}
+
+        total_prs = summary.get('total_prs', 0)
+        merge_ready = summary.get('merge_ready', 0)
+        merge_ready_percent = round((merge_ready / total_prs * 100)) if total_prs > 0 else 0
+
+        # Parse readiness distribution
+        readiness_distribution = {
+            'READY_TO_MERGE': 0,
+            'NEARLY_READY': 0,
+            'NEEDS_WORK': 0,
+            'NOT_READY': 0,
+            'UNANALYZED': 0
+        }
+        if hasattr(readiness_result, 'results'):
+            for row in readiness_result.results:
+                row_dict = _to_py(row)
+                classification = row_dict.get('classification', 'UNANALYZED')
+                if classification in readiness_distribution:
+                    readiness_distribution[classification] = row_dict.get('count', 0)
+                else:
+                    readiness_distribution['UNANALYZED'] = readiness_distribution.get('UNANALYZED', 0) + row_dict.get('count', 0)
+
+        # Parse top blocked repos
+        top_blocked_repos = []
+        if hasattr(blocked_repos_result, 'results'):
+            for row in blocked_repos_result.results:
+                row_dict = _to_py(row)
+                top_blocked_repos.append({
+                    'repo': row_dict.get('repo', ''),
+                    'blocked_count': row_dict.get('blocked_count', 0)
+                })
+
+        # Parse most active authors
+        most_active_authors = []
+        if hasattr(authors_result, 'results'):
+            for row in authors_result.results:
+                row_dict = _to_py(row)
+                most_active_authors.append({
+                    'author': row_dict.get('author_login', ''),
+                    'pr_count': row_dict.get('pr_count', 0)
+                })
+
+        last_updated = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+        return Response.new(json.dumps({
+            'summary': {
+                'total_prs': total_prs,
+                'merge_ready': merge_ready,
+                'merge_ready_percent': merge_ready_percent,
+                'draft_prs': summary.get('draft_prs', 0),
+                'stale_prs': summary.get('stale_prs', 0)
+            },
+            'readiness_distribution': readiness_distribution,
+            'ci_health': {
+                'all_passing': summary.get('all_ci_passing', 0),
+                'has_failures': summary.get('has_ci_failures', 0),
+                'no_checks': summary.get('no_checks', 0)
+            },
+            'top_blocked_repos': top_blocked_repos,
+            'most_active_authors': most_active_authors,
+            'last_updated': last_updated
+        }), {'headers': {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=60, stale-while-revalidate=300'
+        }})
+
+    except Exception as e:
+        await notify_slack_exception(getattr(env, 'SLACK_ERROR_WEBHOOK', ''), e, context={'handler': 'handle_dashboard'})
+        return Response.new(
+            json.dumps({'error': 'Internal server error'}),
+            {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+        )
+    
 async def handle_pr_updates_check(env):
     """
     GET /api/prs/updates
