@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "PR Readiness Checker - Track and monitor GitHub Pull Request status",
   "scripts": {
-    "dev": "wrangler dev",
+    "fingerprint": "node scripts/fingerprint.js",
+    "dev": "npm run fingerprint && wrangler dev",
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create pr_tracker",
     "db:migrate:local": "wrangler d1 migrations apply pr_tracker --local",
