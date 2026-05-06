@@ -1,0 +1,183 @@
+name: Flakiness Detector
+
+# Runs after any CI workflow completes and can also be triggered manually for testing.
+on:
+  workflow_run:
+    workflows: ["PR Validation", "Test Data Display"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      workflow_run_id:
+        description: 'Workflow run ID to analyse (required for manual trigger)'
+        required: true
+        type: string
+      repo:
+        description: 'Repository in owner/repo format'
+        required: false
+        default: 'OWASP-BLT/BLT-Leaf'
+      pr_number:
+        description: 'PR number (optional)'
+        required: false
+        type: string
+
+permissions:
+  issues: write          # create / reopen / comment on flaky-test issues
+  pull-requests: write   # post flakiness summary comment on PRs
+  actions: write         # trigger rerun-failed-jobs
+
+jobs:
+  detect:
+    name: Detect & Record Flakiness
+    runs-on: ubuntu-latest
+
+    # Skip runs triggered by this workflow's own bot commits to prevent loops
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion != null &&
+       !contains(github.event.workflow_run.head_commit.message, '[skip ci]'))
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Python + dependencies
+      # -----------------------------------------------------------------------
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install --quiet requests pyyaml
+
+      # -----------------------------------------------------------------------
+      # 3. Resolve run metadata (works for both trigger types)
+      # -----------------------------------------------------------------------
+      - name: Resolve workflow run metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_id=${{ github.event.inputs.workflow_run_id }}" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.event.inputs.repo }}"              >> "$GITHUB_OUTPUT"
+            echo "pr_number=${{ github.event.inputs.pr_number }}"    >> "$GITHUB_OUTPUT"
+          else
+            echo "run_id=${{ github.event.workflow_run.id }}"        >> "$GITHUB_OUTPUT"
+            echo "repo=${{ github.repository }}"                     >> "$GITHUB_OUTPUT"
+            # Extract PR number from workflow_run context (empty string if not a PR run)
+            PR=$(echo '${{ toJson(github.event.workflow_run.pull_requests) }}' \
+                 | python3 -c "import json,sys; prs=json.load(sys.stdin); print(prs[0]['number'] if prs else '')")
+            echo "pr_number=${PR}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -----------------------------------------------------------------------
+      # 4. Collect CI results → writes ci_run_history rows to D1, outputs failed jobs
+      # -----------------------------------------------------------------------
+      - name: Collect CI results
+        id: collect
+        env:
+          CLOUDFLARE_ACCOUNT_ID:    ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN:     ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python scripts/flakiness/collect_ci_results.py \
+            --workflow-run-id "${{ steps.meta.outputs.run_id }}" \
+            --repo            "${{ steps.meta.outputs.repo }}" \
+            --github-token    "${{ secrets.GITHUB_TOKEN }}" \
+            ${{ steps.meta.outputs.pr_number != '' && format('--pr-number {0}', steps.meta.outputs.pr_number) || '' }} \
+          | tee /tmp/collect_output.json
+
+          # Expose whether any test failures were found
+          FAILED=$(python3 -c "
+          import json, sys
+          d = json.load(open('/tmp/collect_output.json'))
+          print('true' if d.get('failed_jobs') else 'false')
+          ")
+          echo "has_failures=${FAILED}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 5. Retry failed jobs (only when there are first-attempt failures)
+      # -----------------------------------------------------------------------
+      - name: Retry failed jobs
+        id: retry
+        if: steps.collect.outputs.has_failures == 'true'
+        env:
+          CLOUDFLARE_ACCOUNT_ID:    ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN:     ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python scripts/flakiness/retry_failures.py \
+            --workflow-run-id "${{ steps.meta.outputs.run_id }}" \
+            --repo            "${{ steps.meta.outputs.repo }}" \
+            --github-token    "${{ secrets.GITHUB_TOKEN }}" \
+            --collect-output  /tmp/collect_output.json \
+          | tee /tmp/retry_output.json
+
+      # -----------------------------------------------------------------------
+      # 6. Re-collect after retry so flake_confirmed rows are recorded in D1
+      # -----------------------------------------------------------------------
+      - name: Re-collect after retry
+        if: steps.collect.outputs.has_failures == 'true'
+        env:
+          CLOUDFLARE_ACCOUNT_ID:    ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN:     ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python scripts/flakiness/collect_ci_results.py \
+            --workflow-run-id "${{ steps.meta.outputs.run_id }}" \
+            --repo            "${{ steps.meta.outputs.repo }}" \
+            --github-token    "${{ secrets.GITHUB_TOKEN }}" \
+            ${{ steps.meta.outputs.pr_number != '' && format('--pr-number {0}', steps.meta.outputs.pr_number) || '' }} \
+          > /dev/null
+
+      # -----------------------------------------------------------------------
+      # 7. Analyse flakiness → upserts flakiness_scores in D1, outputs classification
+      # -----------------------------------------------------------------------
+      - name: Analyse flakiness
+        id: analyze
+        env:
+          CLOUDFLARE_ACCOUNT_ID:    ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN:     ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python scripts/flakiness/analyze_flakiness.py \
+            --repo "${{ steps.meta.outputs.repo }}" \
+          | tee /tmp/flaky_report.json
+
+          FLAKY_COUNT=$(python3 -c "
+          import json
+          d = json.load(open('/tmp/flaky_report.json'))
+          print(len(d.get('flaky', [])))
+          ")
+          echo "flaky_count=${FLAKY_COUNT}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 8. Report flakiness to GitHub Issues / PR comment, write local files
+      # -----------------------------------------------------------------------
+      - name: Report flakiness
+        env:
+          CLOUDFLARE_ACCOUNT_ID:    ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN:     ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python scripts/flakiness/report_flakiness.py \
+            --repo         "${{ steps.meta.outputs.repo }}" \
+            --github-token "${{ secrets.GITHUB_TOKEN }}" \
+            ${{ steps.meta.outputs.pr_number != '' && format('--pr-number {0}', steps.meta.outputs.pr_number) || '' }} \
+            --flaky-report /tmp/flaky_report.json
+
+      # -----------------------------------------------------------------------
+      # 9. Upload report artifacts (flakiness_report.md + flakiness_metrics.json)
+      # -----------------------------------------------------------------------
+      - name: Upload flakiness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flakiness-report
+          path: |
+            data/flakiness_report.md
+            data/flakiness_metrics.json
+          if-no-files-found: ignore
