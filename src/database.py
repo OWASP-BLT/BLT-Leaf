@@ -23,8 +23,11 @@ def get_db(env):
                 pass
     
     # Database not configured - raise error
-    print(f"DEBUG: env attributes: {dir(env)}")
-    raise Exception("Database binding 'pr_tracker' or 'DB' not found in env. Please configure a D1 database.")
+    # FIXED
+    raise Exception(
+        "Database binding not found in env. "
+        "Ensure a D1 database is bound as 'pr_tracker' or 'DB' in wrangler.toml."
+    )
 
 
 async def save_readiness_to_db(env, pr_id, readiness_data):
@@ -49,7 +52,7 @@ async def save_readiness_to_db(env, pr_id, readiness_data):
         stale_feedback_json = json.dumps(review_health.get('stale_feedback', []))
         
         # Update the existing PR row with readiness data
-        stmt = db.prepare('''
+        await db.prepare('''
             UPDATE prs SET
                 overall_score = ?,
                 ci_score = ?,
@@ -69,9 +72,7 @@ async def save_readiness_to_db(env, pr_id, readiness_data):
                 readiness_computed_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        ''')
-        
-        await stmt.bind(
+        ''').bind(
             readiness.get('overall_score'),
             readiness.get('ci_score'),
             readiness.get('review_score'),
@@ -110,7 +111,7 @@ async def load_readiness_from_db(env, pr_id):
         db = get_db(env)
         
         # Load PR data with readiness fields - explicitly select needed columns
-        stmt = db.prepare('''
+        result = await db.prepare('''
             SELECT id, title, author_login, repo_owner, repo_name, pr_number, 
                    state, is_merged, mergeable_state, files_changed,
                    checks_passed, checks_failed, checks_skipped,
@@ -121,8 +122,7 @@ async def load_readiness_from_db(env, pr_id):
                    stale_feedback_count, stale_feedback,
                    readiness_computed_at
             FROM prs WHERE id = ?
-        ''')
-        result = await stmt.bind(pr_id).first()
+        ''').bind(pr_id).first()
         
         if not result:
             print(f"Database: PR {pr_id} not found")
@@ -130,6 +130,8 @@ async def load_readiness_from_db(env, pr_id):
         
         # Convert result to Python dict
         pr = result.to_py() if hasattr(result, 'to_py') else dict(result)
+        if hasattr(result, 'destroy'):
+            result.destroy()
         
         # Check if readiness data exists (overall_score will be None if never computed)
         if pr.get('overall_score') is None:
@@ -219,17 +221,12 @@ async def load_readiness_from_db(env, pr_id):
 
 
 async def delete_readiness_from_db(env, pr_id):
-    """Clear readiness analysis results from database (prs table).
-    
-    Args:
-        env: Worker environment with database binding
-        pr_id: PR ID
-    """
+    """Clear readiness analysis results from database (prs table)."""
     try:
         db = get_db(env)
         
-        # Clear readiness fields in the prs table
-        stmt = db.prepare('''
+        # FIX: Inline chain .prepare().bind().run() and capture the result proxy
+        result_proxy = await db.prepare('''
             UPDATE prs SET
                 overall_score = NULL,
                 ci_score = NULL,
@@ -249,8 +246,11 @@ async def delete_readiness_from_db(env, pr_id):
                 readiness_computed_at = NULL,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        ''')
-        await stmt.bind(pr_id).run()
+        ''').bind(pr_id).run()
+        
+        # FIX: Explicitly destroy the proxy to free Worker memory
+        if hasattr(result_proxy, 'destroy'):
+            result_proxy.destroy()
         
         print(f"Database: Cleared readiness data for PR {pr_id}")
     except Exception as e:
@@ -304,39 +304,42 @@ async def upsert_pr(db, pr_url, owner, repo, pr_number, pr_data):
         pr_data.get('commits_count') or 0,
         pr_data.get('behind_by') or 0,
         pr_data.get('review_status') or '',
-        pr_data.get('last_updated_at') or current_timestamp, current_timestamp, current_timestamp,
+        pr_data.get('last_updated_at') or current_timestamp,
+        current_timestamp,
+        current_timestamp,
         1 if pr_data.get('is_draft') else 0,
         pr_data.get('open_conversations_count') or 0,
         pr_data.get('reviewers_json') or '[]',
         pr_data.get('etag') or ''
     )
     
-    await stmt.run()
+    run_result = await stmt.run()
+    result_py = run_result.to_py() if hasattr(run_result, 'to_py') else {'success': True}
+    if hasattr(run_result, 'destroy'):
+        run_result.destroy()
+    if not result_py.get('success', True):
+        raise Exception(f"upsert_pr failed for {pr_url}: {result_py}")
 
 
 async def save_timeline_to_db(env, owner, repo, pr_number, data):
-    """Save timeline data to D1 database.
-    
-    Args:
-        env: Worker environment with database binding
-        owner: Repository owner
-        repo: Repository name
-        pr_number: PR number
-        data: Timeline data to cache (dict)
-    """
+    """Save timeline data to D1 database."""
     try:
         db = get_db(env)
         current_time = str(time.time())
         
-        stmt = db.prepare('''
+        # FIX: Inline chain .prepare().bind().run() and capture the result proxy
+        result_proxy = await db.prepare('''
             INSERT INTO timeline_cache (owner, repo, pr_number, data, timestamp)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(owner, repo, pr_number) DO UPDATE SET
                 data = excluded.data,
                 timestamp = excluded.timestamp
-        ''').bind(owner, repo, pr_number, json.dumps(data), current_time)
+        ''').bind(owner, repo, pr_number, json.dumps(data), current_time).run()
         
-        await stmt.run()
+        # FIX: Explicitly destroy the proxy to prevent memory leaks in the isolate
+        if hasattr(result_proxy, 'destroy'):
+            result_proxy.destroy()
+            
         print(f"Database: Saved timeline data for {owner}/{repo}#{pr_number}")
     except Exception as e:
         print(f"Error saving timeline to database for {owner}/{repo}#{pr_number}: {str(e)}")
@@ -365,7 +368,10 @@ async def load_timeline_from_db(env, owner, repo, pr_number):
         if not result:
             return None, None
             
-        result = result.to_py() if hasattr(result, 'to_py') else dict(result)
+        converted = result.to_py() if hasattr(result, 'to_py') else dict(result)
+        if hasattr(result, 'destroy'):
+            result.destroy()
+        result = converted     
         return json.loads(result['data']), float(result['timestamp'])
     except Exception as e:
         print(f"Error loading timeline from database for {owner}/{repo}#{pr_number}: {str(e)}")
@@ -373,22 +379,20 @@ async def load_timeline_from_db(env, owner, repo, pr_number):
 
 
 async def delete_timeline_from_db(env, owner, repo, pr_number):
-    """Delete timeline data from D1 database.
-    
-    Args:
-        env: Worker environment with database binding
-        owner: Repository owner
-        repo: Repository name
-        pr_number: PR number
-    """
+    """Delete timeline data from D1 database."""
     try:
         db = get_db(env)
-        stmt = db.prepare('''
+        
+        # FIX: Inline chain .prepare().bind().run() and capture the result proxy
+        result_proxy = await db.prepare('''
             DELETE FROM timeline_cache 
             WHERE owner = ? AND repo = ? AND pr_number = ?
-        ''').bind(owner, repo, pr_number)
+        ''').bind(owner, repo, pr_number).run()
         
-        await stmt.run()
+        # FIX: Explicitly destroy the result proxy to free memory
+        if hasattr(result_proxy, 'destroy'):
+            result_proxy.destroy()
+            
         print(f"Database: Deleted timeline cache for {owner}/{repo}#{pr_number}")
     except Exception as e:
         print(f"Error deleting timeline from database for {owner}/{repo}#{pr_number}: {str(e)}")
