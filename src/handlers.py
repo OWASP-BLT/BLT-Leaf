@@ -1133,7 +1133,7 @@ async def handle_github_webhook(request, env):
                 # Fetch fresh PR data and add to tracking
                 webhook_token = getattr(env, 'GITHUB_TOKEN', None)
                 fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number, webhook_token)
-                if fetched_pr_data:
+                if fetched_pr_data and not fetched_pr_data.get('not_found') and not fetched_pr_data.get('not_modified'):
                     await upsert_pr(db, pr_url, repo_owner, repo_name, pr_number, fetched_pr_data)
                     
                     # Get the newly created PR ID
@@ -1208,7 +1208,7 @@ async def handle_github_webhook(request, env):
                 # Fetch fresh PR data
                 webhook_token = getattr(env, 'GITHUB_TOKEN', None)
                 fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number, webhook_token)
-                if fetched_pr_data:
+                if fetched_pr_data and not fetched_pr_data.get('not_found') and not fetched_pr_data.get('not_modified'):
                     await upsert_pr(db, pr_url, repo_owner, repo_name, pr_number, fetched_pr_data)
                     # Invalidate caches
                     await invalidate_readiness_cache(env, pr_id)
@@ -1225,13 +1225,18 @@ async def handle_github_webhook(request, env):
                         }),
                         {'headers': {'Content-Type': 'application/json'}}
                     )
+                else:
+                    return Response.new(
+                        json.dumps({'error': 'Failed to fetch PR data from GitHub'}),
+                        {'status': 500, 'headers': {'Content-Type': 'application/json'}}
+                    )
             
             # Handle synchronized (new commits) or edited PRs - update data
             elif action in ['synchronize', 'edited']:
                 # Fetch fresh PR data
                 webhook_token = getattr(env, 'GITHUB_TOKEN', None)
                 fetched_pr_data = await fetch_pr_data(repo_owner, repo_name, pr_number, webhook_token)
-                if fetched_pr_data:
+                if fetched_pr_data and not fetched_pr_data.get('not_found') and not fetched_pr_data.get('not_modified'):
                     await upsert_pr(db, pr_url, repo_owner, repo_name, pr_number, fetched_pr_data)
                     # Invalidate caches to force fresh analysis
                     await invalidate_readiness_cache(env, pr_id)
@@ -1247,6 +1252,11 @@ async def handle_github_webhook(request, env):
                             'message': f'PR #{pr_number} has been updated'
                         }),
                         {'headers': {'Content-Type': 'application/json'}}
+                    )
+                else:
+                    return Response.new(
+                        json.dumps({'error': 'Failed to fetch PR data from GitHub'}),
+                        {'status': 500, 'headers': {'Content-Type': 'application/json'}}
                     )
         
         # Handle other event types - update PR data to refresh behind_by and mergeable_state
